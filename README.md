@@ -90,7 +90,7 @@ LanceDB is the production store, behind a storage port. An in-memory adapter imp
 
 ### v2
 
-v2 is a separate TypeScript server with its own LanceDB store. Agents reach it over plain HTTP, since it has no MCP surface; T3 Code, the coding-agent app I use, calls it from its memory tools. Agents submit proposals (`POST /v2/proposals`) for any of the three kinds, and an agent proposal applies on create unless a fold ask holds it (below). Agents take and release defects directly, with no proposal. The assessor labels each proposal and flags the ones that look like junk or restatements.
+v2 is a separate TypeScript server with its own LanceDB store. Agents reach it over plain HTTP, since it has no MCP surface; my fork of [T3 Code](https://github.com/pingdotgg/t3code), [simkaz12/t3code](https://github.com/simkaz12/t3code), calls it from the memory tools and tray the fork adds. Agents submit proposals (`POST /v2/proposals`) for any of the three kinds, and an agent proposal applies on create unless a fold ask holds it (below). Agents take and release defects directly, with no proposal. The assessor labels each proposal and flags the ones that look like junk or restatements.
 
 With fold asks on (`TABULARIUM_FOLD_ASK`, off in code and on in the shipped systemd unit), a fact or decision proposal with a close live neighbour in the same scope is not written at once. It is held as `asked` until a human answers `fold` (a merged record is written and the old one is superseded) or `keep_both`, or until the ask expires, when the original proposal is written as submitted.
 
@@ -181,6 +181,10 @@ The Python server has no authentication. v2 only checks the `Host` header agains
 
 - Python 3.12, pydantic, LanceDB, litellm for embeddings and judge backstops, the official MCP Python SDK for the server. ruff, and mypy in strict mode.
 - v2 needs Node 22.18 or newer, the first 22.x that strips types without a flag. It runs TypeScript directly with no build step.
+
+## Credits
+
+v2 is built for my fork, [simkaz12/t3code](https://github.com/simkaz12/t3code), of [T3 Code](https://github.com/pingdotgg/t3code). T3 Code is made by T3 Tools Inc. ([Ping.gg](https://ping.gg/)), built by [Theo Browne](https://github.com/t3dotgg), [Julius Marminge](https://github.com/juliusmarminge) and its contributors, and released under the MIT license.
 
 ## License
 

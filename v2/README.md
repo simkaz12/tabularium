@@ -1,6 +1,6 @@
 # Tabularium v2
 
-TypeScript memory server, run on a small always-on host such as a Raspberry Pi. Agents save records through proposals that apply on create unless a fold ask holds them, the cleaner queues its doubts as tiles in a tray in T3 Code, the desktop coding-agent app this server is wired into, for the owner, and recall runs over the v2 store plus a legacy archive built from v1. Legacy rows never change content through the API (`importLegacy --replace` rewrites them) and drop out of recall once a v2 record takes their place.
+TypeScript memory server, run on a small always-on host such as a Raspberry Pi. Agents save records through proposals that apply on create unless a fold ask holds them, the cleaner queues its doubts as tiles for the owner in a tray in my fork of [T3 Code](https://github.com/pingdotgg/t3code) ([simkaz12/t3code](https://github.com/simkaz12/t3code)), which this server is wired into, and recall runs over the v2 store plus a legacy archive built from v1. Legacy rows never change content through the API (`importLegacy --replace` rewrites them) and drop out of recall once a v2 record takes their place.
 
 ## Run locally
 
