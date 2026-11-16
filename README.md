@@ -15,7 +15,7 @@ The design documents under `docs/` ([`SPEC.md`](docs/SPEC.md) and [`docs/adr/`](
 | Path | What it is |
 | --- | --- |
 | `src/tabularium/` | The Python engine (v1), the MCP server and the CLI. About 34k lines. |
-| `v2/` | The TypeScript server (v2): an HTTP API with proposals, a cleaner that queues questions, and a LanceDB store. See [`v2/README.md`](v2/README.md). |
+| `v2/` | The TypeScript server (v2): an HTTP API with proposals, fold asks, a weekly cleaner and a daily defect sweep that queue tiles for a human, and a LanceDB store. See [`v2/README.md`](v2/README.md). |
 | `tests/` | The Python test suite, including a conformance suite that runs both storage adapters through one contract. |
 | `scripts/eval_v1v2/` | A bench that compares v1 and v2 on the same inputs. See [`scripts/eval_v1v2/README.md`](scripts/eval_v1v2/README.md). |
 | `deploy.sh`, `v2/deploy/` | Deploy scripts for a systemd host over ssh. |
@@ -30,18 +30,18 @@ A record is a hypomnema, a durable note kept for later recall. A scope is a flat
 There are three kinds of record:
 
 - A Fact is knowledge that may be revised and decays out of use.
-- A Decision records what was chosen and why. In v2 it also names the option that was ruled out. Its content never changes. A change is a new Decision that supersedes the old one, and the old one stays queryable as history.
+- A Decision records what was chosen and why. In v1 the reason is part of the Decision's text. A v2 record has no `why` field: the thread excerpt in `provenance.excerpt` is the reason, and a v2 Decision names the option that was ruled out in `rejected`. Its content never changes. A change is a new Decision that supersedes the old one, and the old one stays queryable as history.
 - A Defect is a bug an agent saw and left alone. It records where the bug is, what triggers it, the symptom, and why it was left. It moves from `open` to `taken` (an agent is working on it) to `closed`. Closing it takes a proposal whose excerpt is the proof of the fix. A daily sweep sends stale takes back to `open`, and asks a human whether a defect open for 90 days is still real.
 
 The v1 engine has only Facts and Decisions. Defects came with v2.
 
 ### Read side
 
-- `recall` runs a vector leg and a BM25 leg in parallel through the storage interface and fuses them with reciprocal rank fusion in the engine.
+- `recall` (v1) runs a vector leg and a BM25 leg in parallel through the storage interface and fuses them with reciprocal rank fusion in the engine.
 - `context(scope, budget, role)` builds the payload an agent gets at session start. It fills two tiers, `hot` and then `ember`, filters by role and packs the result into a token budget. Hot is a small capped tier that is curated by hand. An ember is a transient nudge that fades if nothing references it.
 - `decisions_query` and the `decision://{id}` resource return Decisions with their supersession chain in a byte-stable render.
 
-The MCP server exposes four tools (`recall`, `decision`, `decisions_query`, `context`) and the `decision://{id}` resource. It has no write tools.
+The MCP server exposes four tools (`recall`, `decision`, `decisions_query`, `context`) and the `decision://{id}` resource. It has no write tools, and its tools read the v1 store only. That store is now a read-only archive.
 
 ### Write side and the dedup gate
 
@@ -61,7 +61,7 @@ The Cleaner is a periodic pass over a scope that judges what the memory should s
 - falsity: a newer record is compared with older ones it may have overtaken, and a contradicted Fact gets a supersession edge.
 - revisit: a rotation over old records, with no watermark, so a quiet scope still gets its old records looked at.
 
-Two judges from different model families grade independently, by default the `claude` and `codex` CLIs, with a litellm backstop when a seat is down. Disagreements are handled by policy. The rubric is a TOML file hashed into a version that is stamped on every verdict. The pass advances its watermark only after it re-reads every write it made and finds it present. It runs nightly when `TABULARIUM_ENABLE_CLEANER=true` (at 03:00 by default), or by hand with `tabularium clean`.
+Two judges from different model families grade independently, by default the `claude` and `codex` CLIs, with a litellm backstop (needs `DEEPSEEK_API_KEY`) when a seat is down. Disagreements are handled by policy. The rubric is a TOML file hashed into a version that is stamped on every verdict. The pass advances its watermark only after it re-reads every write it made and finds it present. It runs nightly when `TABULARIUM_ENABLE_CLEANER=true` (at 03:00 by default, set with `TABULARIUM_CLEANER_NIGHTLY_AT`), or by hand with `tabularium clean`.
 
 ### Storage
 
@@ -69,7 +69,11 @@ LanceDB is the production store, behind a storage port. An in-memory adapter imp
 
 ### v2
 
-v2 is a separate TypeScript server with its own LanceDB store. Agents submit proposals (`POST /v2/proposals`) for any of the three kinds, and an agent proposal applies on create. Agents take and release defects directly, with no proposal. A checker model (the same hosted assessor) labels each proposal and flags the ones that look like junk or restatements. A weekly cleaner queues merge, supersede, retire and promote suggestions as tiles for a human to approve or reject. Records imported from a v1 store sit in a separate legacy table that recall searches alongside the v2 records; legacy rows never change and drop out of recall once a v2 record replaces them. The route list and every status code are in [`v2/README.md`](v2/README.md).
+v2 is a separate TypeScript server with its own LanceDB store. Agents reach it over plain HTTP, since it has no MCP surface; T3 Code, the coding-agent app I use, calls it from its memory tools. Agents submit proposals (`POST /v2/proposals`) for any of the three kinds, and an agent proposal applies on create unless a fold ask holds it (below). Agents take and release defects directly, with no proposal. A checker model (the same hosted assessor) labels each proposal and flags the ones that look like junk or restatements.
+
+With fold asks on (`TABULARIUM_FOLD_ASK`, off in code and on in the shipped systemd unit), a fact or decision proposal with a close live neighbour in the same scope is not written at once. It is held as `asked` until a human answers `fold` (a merged record is written and the old one is superseded) or `keep_both`, or until the ask expires, when the original proposal is written as submitted.
+
+A cleaner runs weekly (Sunday 03:00 server time) and queues merge, supersede, retire and promote suggestions as tiles for a human to approve or reject. A defect sweep runs daily at 05:00 and queues a close tile for each defect that has been open 90 days. Records imported from a v1 store sit in a separate legacy table that recall searches alongside the v2 records; legacy rows never change through the API and drop out of recall once a v2 record replaces them. v2 recall is hybrid search over the v2 and legacy rows, reranked by the Jev checker, with `kind` and `audience` filters. It is a different path from the v1 fusion described above. The route list and every status code are in [`v2/README.md`](v2/README.md).
 
 ## Quick start
 
@@ -150,12 +154,12 @@ DEPLOY_HOST=user@host DEPLOY_DIR=tabularium-v2 DEPLOY_HEALTH_URL=http://host:878
 
 `deploy.sh` pulls and syncs the Python checkout on the host, waits for the Cleaner's judge subprocesses to finish so a restart does not kill a pass half way, restarts the unit, and lists the tools the new process serves. `./deploy.sh --drain-only` runs only the wait. `v2/deploy/deploy.sh` syncs `v2/`, installs a systemd unit rendered from `v2/deploy/tabularium-v2.service`, restarts it and polls the health URL. Neither script ships a unit for the Python server, so create `tabularium-mcp.service` yourself or set `DEPLOY_UNIT`.
 
-The servers have no authentication. Bind them to loopback or a private interface.
+The Python server has no authentication. v2 only checks the `Host` header against `TABULARIUM_ALLOWED_HOSTS`. Bind both to loopback or a private interface. The MCP HTTP transport defaults to `127.0.0.1:8787`.
 
 ## Layout notes
 
-- Python 3.12, pydantic, LanceDB, litellm for embeddings and judge backstops, the official MCP Python SDK for the server. ruff and mypy in strict mode.
-- v2 needs Node 22 or newer. It runs TypeScript directly with no build step.
+- Python 3.12, pydantic, LanceDB, litellm for embeddings and judge backstops, the official MCP Python SDK for the server. ruff, and mypy in strict mode.
+- v2 needs Node 22.18 or newer, the first 22.x that strips types without a flag. It runs TypeScript directly with no build step.
 
 ## License
 

@@ -1,6 +1,6 @@
 # Tabularium v2
 
-TypeScript memory server, run on a small always-on host such as a Raspberry Pi. Agents save records through proposals that apply at once, the cleaner queues its doubts as tiles in a tray in T3 Code, the desktop coding-agent app this server is wired into, for the owner, and recall runs over the v2 store plus a legacy archive built from v1. Legacy rows never change content and drop out of recall once a v2 record takes their place.
+TypeScript memory server, run on a small always-on host such as a Raspberry Pi. Agents save records through proposals that apply on create unless a fold ask holds them, the cleaner queues its doubts as tiles in a tray in T3 Code, the desktop coding-agent app this server is wired into, for the owner, and recall runs over the v2 store plus a legacy archive built from v1. Legacy rows never change content through the API (`importLegacy --replace` rewrites them) and drop out of recall once a v2 record takes their place.
 
 ## Run locally
 
@@ -11,7 +11,7 @@ npx vitest run
 node src/main.ts
 ```
 
-Node 22 or newer. The server strips types itself, so there is no build step.
+Node 22.18 or newer. The server strips types itself, so there is no build step.
 
 ## Configuration
 
@@ -26,11 +26,17 @@ Node 22 or newer. The server strips types itself, so there is no build step.
 | `TABULARIUM_EMBED_DIM` | `768` |
 | `TABULARIUM_EMBED_TIMEOUT_MS` | `10000`; one total deadline per embedding request, a miss answers 503 |
 | `TABULARIUM_ASSESSOR_MODEL` | `jev-1.13.0` |
-| `TABULARIUM_TOPICS_PATH` | `v2/topics.json` |
+| `TABULARIUM_TOPICS_PATH` | `topics.json` next to `package.json` |
 | `TABULARIUM_JEV_TIMEOUT_MS` | `15000`; one total deadline per Jev call, the SDK does not retry |
+| `TABULARIUM_CONTAINMENT` | `on`; accepts `on`, `true`, `1`, `yes`, `off`, `false`, `0`, `no`; flags a proposal that covers a live neighbour |
+| `TABULARIUM_CONTAINMENT_FLOOR` | `0.95`; how fully the new text must cover the neighbour, 0 to 1 |
+| `TABULARIUM_FOLD_ASK` | `off`; same accepted values; the shipped unit sets `on` |
+| `TABULARIUM_FOLD_SIMILARITY_FLOOR` | `0.8`; minimum similarity for a fold ask, 0 to 1 |
+| `TABULARIUM_FOLD_SUBJECT_FLOOR` | `0.7`; minimum same-subject score for a fold ask, 0 to 1 |
+| `TABULARIUM_FOLD_ASK_TIMEOUT_MS` | `600000`; how long an ask waits for an answer |
 | `TYPESAFE_API_KEY` | none; without it checks and rerank are skipped and proposals carry `jev_unavailable` |
 
-Requests whose `Host` header is not in `TABULARIUM_ALLOWED_HOSTS` get a 403. There is no other auth; bind it to loopback or a private interface (for example a VPN address) and keep it off the public internet.
+Containment and fold asks apply only to fact and decision proposals with no `target`. Requests whose `Host` header is not in `TABULARIUM_ALLOWED_HOSTS` get a 403. There is no other auth; bind it to loopback or a private interface (for example a VPN address) and keep it off the public internet.
 
 ## API
 
@@ -38,14 +44,16 @@ Base `/v2`. Bodies and responses are JSON.
 
 | Route | Purpose |
 | --- | --- |
-| `POST /proposals` | create a proposal and run the Jev checks; an `agent` proposal applies on create: the response is `201` with `status: "approved"` and `resolution.recordId` (the new record, or the closed defect for a close target), and a Jev `reinforce` suggestion counts the reinforcement on the neighbour and answers `status: "reinforced"` with that neighbour's id and no new record; a `supersede` suggestion does not apply and stays on the proposal row for the cleaner |
-| `GET /proposals?status=pending&since=<iso>` | list proposals; an unknown query parameter such as `section` is ignored |
-| `POST /proposals/:id/approve` | write a record or apply the proposal's target action; `edits` may carry `headline`, `scope`, `purpose`, `topic`, `audience` and `fields.{claim,rejected,where,trigger,leftBecause,fixHint,impact}` |
+| `POST /proposals` | create a proposal and run the Jev checks; an `agent` proposal applies on create: the response is `201` with `status: "approved"` and `resolution.recordId` (the new record, or the closed defect for a close target), and a Jev `reinforce` suggestion counts the reinforcement on the neighbour and answers `status: "reinforced"` with that neighbour's id and no new record; a `supersede` suggestion does not apply and stays on the proposal row for the cleaner; with fold asks on, a close match returns `201` with `status: "asked"` and an `ask` object instead (see Fold asks); a reinforce on a legacy neighbour answers with the id of the promoted v2 copy, not the neighbour's id |
+| `GET /proposals?status=pending&since=<iso>` | list proposals; `status` is `pending` (the default), `approved`, `rejected`, `reinforced`, `asked`, `folded` or `all`; any other status or a `since` that is not a timestamp returns 400; an unknown query parameter such as `section` is ignored |
+| `GET /asks?since=<iso>` | list held and answered fold asks, `{"counts": {"fold", "keep_both", "unanswered", "open"}, "asks": [...]}` |
+| `POST /proposals/:id/answer` | answer an `asked` proposal with `{"action": "keep_both", "reason": "..."}` or `{"action": "fold", "kind": "fact" or "decision", "headline": "...", "fields": {...}}`; repeating the same answer is safe, a different one returns 409 |
+| `POST /proposals/:id/approve` | write a record or apply the proposal's target action; `edits` may carry `headline`, `scope`, `purpose`, `topic`, `audience` and `fields.{claim,rejected,where,trigger,leftBecause,fixHint,impact}`; the body also takes top-level `supersedes` (record ids) and `reason` (a reason class: `correction`, `changed` or `elaborated`, required when a supersede applies) |
 | `POST /proposals/:id/reject` | close without a record, body `{"reason": "..."}` with a non-empty reason |
-| `POST /proposals/:id/reinforce` | count a reinforcement on `recordId`, close without a record |
-| `GET /recall?q=&scope=&kind=&audience=&limit=` | hybrid search over v2 and legacy, reranked by Jev; `kind` is `fact`, `decision` or `defect`; `audience` keeps records for that role and unlabelled ones |
+| `POST /proposals/:id/reinforce` | body `{"recordId": "..."}`, required; count a reinforcement on that record, close without a record, return the record; a legacy `recordId` promotes a copy |
+| `GET /recall?q=&scope=&kind=&audience=&limit=` | `q` is required (400 when empty); `limit` is a positive integer, default 10, at most 50; a bad `kind` or `audience` returns 400; hybrid search over v2 and legacy, reranked by Jev; `kind` is `fact`, `decision` or `defect`; `audience` keeps records for that role and unlabelled ones |
 | `GET /records/:id` | one record with lineage and `takenBy` |
-| `POST /records/:id/take` | mark an open defect as taken, body `{"threadId": "...", "link": "..."}`, returns the record |
+| `POST /records/:id/take` | mark an open defect as taken, body `{"threadId": "...", "link": "..."}` with both non-empty, returns the record |
 | `POST /records/:id/release` | return a taken defect to open, empty body, returns the record; `takenAt` keeps the last-take time and `takenBy` is `null`; a defect that is not taken comes back unchanged |
 | `POST /records/:id/unsupersede` | undo a supersede, `reason` required |
 | `DELETE /records/:id` | delete a record that holds a secret, body `{"reason": "...", "category": "secret"}` |
@@ -89,10 +97,20 @@ Recall with a `scope` also returns `global` records. Quotes and other full-text 
 | 400 | invalid JSON or fields; a defect missing `where`, `trigger`, `left_because` or its symptom; a reject without a `reason`; an unknown `audience`; take or release on a record that is not a defect; a malformed percent escape in the path; `origin` other than `agent` on `POST /proposals`, including `harvest`; `DELETE` without a non-empty `reason` or without `category: "secret"`; a `PUT /settings` value outside 0 to 1, a non-number or an unknown key |
 | 403 | `Host` header not allowed |
 | 404 | unknown route, record or proposal |
-| 409 | approve, reject or reinforce on a proposal that is not pending; take on a defect that is taken or closed; a close for a record that is not an open or taken v2 defect; a reinforce, supersede or retire on a record that is not live; a second promote of the same legacy row; `unsupersede` on a legacy row a v2 record replaced; `DELETE` on a record that is the replacement for another record |
+| 413 | request body over 1,000,000 bytes |
+| 409 | approve, reject or reinforce on a proposal that is not pending; take on a defect that is taken or closed; a close for a record that is not an open or taken v2 defect; a reinforce, supersede or retire on a record that is not live; a second promote of the same legacy row; `unsupersede` on a record that is not superseded, or on a legacy row a v2 record replaced; `DELETE` on a record that is the replacement for another record |
+| 500 | internal error |
 | 503 | the embedder is down (Ollama unreachable or returning bad vectors) |
 
 A Jev outage is not an error. `POST /proposals` returns within `TABULARIUM_JEV_TIMEOUT_MS` plus a small margin and the proposal carries `jev_unavailable`.
+
+### Fold asks
+
+With `TABULARIUM_FOLD_ASK` on, an agent fact or decision proposal with no `target` that has a close live neighbour in the same scope is held with `status: "asked"` and an `ask` object. The ask names the existing record. A human answers through `POST /proposals/:id/answer`. `fold` writes the merged record, supersedes the old one with reason `elaborated`, and ends the proposal as `folded`. `keep_both` writes the original proposal and ends it as `approved`. When `TABULARIUM_FOLD_ASK_TIMEOUT_MS` passes with no answer, the original is written and the ask is marked `unanswered`. A sweep every 60 seconds does the expiry and logs `{"event":"asks-expired",...}`.
+
+Containment is separate. When the new text covers a live neighbour at or above `TABULARIUM_CONTAINMENT_FLOOR`, the proposal gets a `covers:<recordId>` flag. With fold asks on it is held against that neighbour; with them off it is written and keeps the flag.
+
+The other flags a proposal can carry are `kind_differs`, `worth_not_keep`, `perishable_not_standing`, `rejected_missing`, `relation_unavailable:<id>`, `pair_unavailable:<id>`, `restatement:<id>` and `replacement:<id>`.
 
 ### Retries
 
@@ -104,7 +122,7 @@ Approve is safe to retry. The new record takes the proposal's id, so a retry aft
 
 ### Legacy retirement
 
-Legacy rows are created only by the import. Their content never changes, and their lifecycle moves only from `live` to `retired`, with `supersededBy` set to the v2 record that took over. Retired legacy rows do not appear in recall. Approving any of these retires the row:
+Legacy rows are created only by the import. Their content never changes, and their lifecycle moves only from `live` to `retired`, with `supersededBy` set to the v2 record that took over when promote, supersede or reinforce retired it. A plain retire leaves `supersededBy` null and sets `retiredReason`. Retired legacy rows do not appear in recall. Approving any of these retires the row:
 
 - promote: a v2 copy carrying `legacyId`
 - supersede with a legacy id in `supersedes`: a new v2 record
@@ -156,9 +174,9 @@ DEPLOY_HEALTH_URL=http://host:8789/v2/health \
 bash v2/deploy/deploy.sh
 ```
 
-Syncs the `v2/` working tree to `DEPLOY_DIR` on the host, runs `npm ci --omit=dev`, renders `deploy/tabularium-v2.service` with the remote directory and ssh user, installs it and restarts only that unit. It ships whatever is on disk, committed or not, and `rsync --delete` removes remote files that are not in `v2/`. Set `DEPLOY_UFW_CIDR` to open port 8789 to a source range with ufw. The script fails with a usage message when a required variable is unset.
+Syncs the `v2/` working tree to `DEPLOY_DIR` on the host, runs `npm ci --omit=dev`, renders `deploy/tabularium-v2.service` with the remote directory and ssh user, installs it and restarts only that unit. It excludes `node_modules`, `*.log` and `eval/`. It ships whatever else is on disk, committed or not, and `rsync --delete` removes remote files that are not in `v2/`. Set `DEPLOY_UFW_CIDR` to open port 8789 to a source range with ufw. The script fails with a usage message when a required variable is unset.
 
-Edit the unit before the first deploy: `TABULARIUM_HOST` binds to loopback, `TABULARIUM_STORE` points at `/var/lib/tabularium-v2/store` and must be writable by the service user, and the unit reads `TYPESAFE_API_KEY` from `/etc/tabularium/typesafe.env`. The unit expects `topics.json` next to `package.json`; without it the topic label is skipped.
+Edit the unit before the first deploy: `TABULARIUM_HOST` binds to loopback, `TABULARIUM_STORE` points at `/var/lib/tabularium-v2/store` and must be writable by the service user, and the unit reads `TYPESAFE_API_KEY` from `/etc/tabularium/typesafe.env`. The unit also sets the fold, containment and `TABULARIUM_TOPICS_PATH` variables. The unit expects `topics.json` next to `package.json`; without it the topic label is skipped.
 
 Starting the server against an older store adds the missing columns to each table and logs `{"event":"columns-added",...}`; a store that already has them is left alone.
 
