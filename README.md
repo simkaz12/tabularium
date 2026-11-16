@@ -57,6 +57,8 @@ The outcomes of a save are `saved`, `reinforced`, `revived`, `reconciled`, `boun
 
 Jev is a hosted model from TypeSafe (typesafe.ai) that answers typed questions about text. A call sends some state and a question, and gets back a label with probabilities or a score, not generated prose. Both servers pin a versioned model id, `jev-1.13.0` by default (`TABULARIUM_ASSESSOR_MODEL`; v1 rejects aliases). Both read `TYPESAFE_API_KEY`. v1 posts to `https://api.typesafe.ai/v1/systemone` with `httpx`. v2 uses the `@typesafe-ai/sdk` client with retries off.
 
+I picked a classifier over prompting a general LLM because these questions are classification, and Jev answers them cheaply, quickly and consistently. A general model takes longer to settle on a label, and a v2 proposal can need up to seven answers before it is written.
+
 Jev sits behind a seam. In v1 it is the `Assessor` protocol in `engine/assessor.py`, which returns a verdict or a typed `Unavailable` (`absent`, `timeout` or `error`). Tests pass small in-test assessors (v2: a stub client), so no suite touches the network. Deadlines: 2 s on the v1 save path, 10 s in the v1 Cleaner, 15 s in v2 (`TABULARIUM_JEV_TIMEOUT_MS`).
 
 In v1, the dedup gate asks for one relation per near neighbour. The four `TABULARIUM_AUTO_EXIT_*` flags are off by default. Each lets one label take its exit without a human, if a legal-exit check on kind, scope and reason class agrees. There is no confidence floor on this path. Verdicts are stored in the `assessor_verdicts` table. With no key, or when a call fails, the save bounces to the caller.
