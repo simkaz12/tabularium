@@ -76,7 +76,7 @@ Every proposal carries `audience` (or null) and `reader` (`lookup`, `trap`, `rul
 
 ### Jev questions and flags
 
-Jev answers one request per proposal. The gate questions are `kind`, `worth`, `perishable` and `reader`; `perishable` is not asked on a defect. `audience`, `breadth`, `scope`, `purpose` and the optional `topic` are labels. `headline_faithful`, `claim_standing` and `excerpt_grounds` are shape checks, plus `rejected_names_alternative` on a decision that names one.
+Jev gets one request about the record and two per neighbour (relation, then the pair questions), for the nearest three, so up to seven calls per proposal. The gate questions are `kind`, `worth`, `perishable` and `reader`; `perishable` is not asked on a defect. `audience`, `breadth`, `scope`, `purpose` and the optional `topic` are labels. `headline_faithful`, `claim_standing` and `excerpt_grounds` are shape checks, plus `rejected_names_alternative` on a decision that names one.
 
 Every choice question has an `unclear` answer for when the text does not give enough to tell. An `unclear` answer flags `unclear:<question>`, never demotes, never produces a suggestion, and stores a null audience or purpose. The confidence floor is 0.5.
 

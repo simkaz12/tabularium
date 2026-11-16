@@ -49,9 +49,30 @@ The MCP server exposes four tools (`recall`, `decision`, `decisions_query`, `con
 
 Four plain string checks (numbers, versions, named entities, negation) catch pairs that cosine similarity treats as one but that differ in a way that matters, such as "50 per page" against "100 per page".
 
-When `TYPESAFE_API_KEY` is set, the assessor (a hosted model from typesafe.ai) classifies the relation between the incoming record and its neighbour as restatement, replacement, follow-up or distinct. Four flags, one per label, can turn a label into an automatic exit. They are off by default.
+When `TYPESAFE_API_KEY` is set, the assessor classifies the relation between the incoming record and its neighbour as restatement, replacement, follow-up or distinct. See [The assessor (Jev)](#the-assessor-jev) for the automatic exits and what happens when it is down.
 
 The outcomes of a save are `saved`, `reinforced`, `revived`, `reconciled`, `bounced` and `already_saved`.
+
+### The assessor (Jev)
+
+Jev is a hosted model from TypeSafe (typesafe.ai) that answers typed questions about text. A call sends some state and a question, and gets back a label with probabilities or a score, not generated prose. Both servers pin a versioned model id, `jev-1.13.0` by default (`TABULARIUM_ASSESSOR_MODEL`; v1 rejects aliases). Both read `TYPESAFE_API_KEY`. v1 posts to `https://api.typesafe.ai/v1/systemone` with `httpx`. v2 uses the `@typesafe-ai/sdk` client with retries off.
+
+Jev sits behind a seam. In v1 it is the `Assessor` protocol in `engine/assessor.py`, which returns a verdict or a typed `Unavailable` (`absent`, `timeout` or `error`). Tests pass small in-test assessors (v2: a stub client), so no suite touches the network. Deadlines: 2 s on the v1 save path, 10 s in the v1 Cleaner, 15 s in v2 (`TABULARIUM_JEV_TIMEOUT_MS`).
+
+In v1, the dedup gate asks for one relation per near neighbour. The four `TABULARIUM_AUTO_EXIT_*` flags are off by default. Each lets one label take its exit without a human, if a legal-exit check on kind, scope and reason class agrees. There is no confidence floor on this path. Verdicts are stored in the `assessor_verdicts` table. With no key, or when a call fails, the save bounces to the caller.
+
+In v2, each proposal gets one request about the record and two per neighbour, for the nearest three:
+
+- Gate questions: `kind`, `worth`, `perishable` (not asked on a defect) and `reader`.
+- Labels: `audience`, `breadth`, `scope`, `purpose` and, when a topics file is present, `topic`.
+- Shape checks: `headline_faithful`, `claim_standing`, `excerpt_grounds`, and `rejected_names_alternative` on a decision that names a rejected option.
+- Neighbour checks: `relation` (with a reason class on a replacement), and the pair questions `newCoversOld` and `sameSubject`.
+
+An `unclear` answer, or a gate answer under confidence 0.5, only adds an `unclear:` or `low_confidence:` flag. A restatement suggests `reinforce`, which applies at once. A replacement suggests `supersede`, which waits on the proposal for the cleaner. No flag blocks a save; the cleaner reads them later.
+
+Jev also reranks v2 recall: it scores the top 20 hits, ten at a time. A failed score leaves that hit in place, and if every call fails the hybrid order stands. The cleaner asks it about duplicate and contradiction pairs and record relevance, up to 200 calls per run, and stops for the run after three consecutive outage errors.
+
+Without a key, v2 skips the checks and the rerank, and proposals still apply with the flag `jev_unavailable`. A timeout or error gives the same flag.
 
 ### Cleaner
 
@@ -69,11 +90,11 @@ LanceDB is the production store, behind a storage port. An in-memory adapter imp
 
 ### v2
 
-v2 is a separate TypeScript server with its own LanceDB store. Agents reach it over plain HTTP, since it has no MCP surface; T3 Code, the coding-agent app I use, calls it from its memory tools. Agents submit proposals (`POST /v2/proposals`) for any of the three kinds, and an agent proposal applies on create unless a fold ask holds it (below). Agents take and release defects directly, with no proposal. A checker model (the same hosted assessor) labels each proposal and flags the ones that look like junk or restatements.
+v2 is a separate TypeScript server with its own LanceDB store. Agents reach it over plain HTTP, since it has no MCP surface; T3 Code, the coding-agent app I use, calls it from its memory tools. Agents submit proposals (`POST /v2/proposals`) for any of the three kinds, and an agent proposal applies on create unless a fold ask holds it (below). Agents take and release defects directly, with no proposal. The assessor labels each proposal and flags the ones that look like junk or restatements.
 
 With fold asks on (`TABULARIUM_FOLD_ASK`, off in code and on in the shipped systemd unit), a fact or decision proposal with a close live neighbour in the same scope is not written at once. It is held as `asked` until a human answers `fold` (a merged record is written and the old one is superseded) or `keep_both`, or until the ask expires, when the original proposal is written as submitted.
 
-A cleaner runs weekly (Sunday 03:00 server time) and queues merge, supersede, retire and promote suggestions as tiles for a human to approve or reject. A defect sweep runs daily at 05:00 and queues a close tile for each defect that has been open 90 days. Records imported from a v1 store sit in a separate legacy table that recall searches alongside the v2 records; legacy rows never change through the API and drop out of recall once a v2 record replaces them. v2 recall is hybrid search over the v2 and legacy rows, reranked by the Jev checker, with `kind` and `audience` filters. It is a different path from the v1 fusion described above. The route list and every status code are in [`v2/README.md`](v2/README.md).
+A cleaner runs weekly (Sunday 03:00 server time) and queues merge, supersede, retire and promote suggestions as tiles for a human to approve or reject. A defect sweep runs daily at 05:00 and queues a close tile for each defect that has been open 90 days. Records imported from a v1 store sit in a separate legacy table that recall searches alongside the v2 records; legacy rows never change through the API and drop out of recall once a v2 record replaces them. v2 recall is hybrid search over the v2 and legacy rows, reranked by Jev, with `kind` and `audience` filters. It is a different path from the v1 fusion described above. The route list and every status code are in [`v2/README.md`](v2/README.md).
 
 ## Quick start
 
