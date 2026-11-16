@@ -1,0 +1,41 @@
+id: p8-composed-targets
+class: admission-composition
+origin: authored
+existing:
+  - alias: e1
+    text: "The dedup gate probes the union of every read span that will see the incoming row."
+    kind: fact
+    scope: p
+    lifecycle: active
+    validity: valid
+    created_at: 2025-01-01T00:00:00Z
+  - alias: e2
+    text: "Composed supersession lands the caller's flip and the Assessor's flip in a single replace call."
+    kind: fact
+    scope: p
+    lifecycle: active
+    validity: valid
+    created_at: 2025-01-01T00:00:00Z
+incoming:
+  content: "Composed supersession lands the caller's flip and the Assessor's flip inside a single replace call."
+  scope: p
+  kind: fact
+  supersedes: [e1]
+  reason: changed
+expect:
+  material: correction
+  step: auto_supersede
+  mutation:
+    acceptable:
+      - "rows == 3"
+      - "e1.superseded_by == incoming"
+      - "e2.superseded_by == incoming"
+      - "history says changed"
+why: >-
+  A caller's own supersedes list composes with the Assessor-found
+  replacement candidate in one replace call (P8 assessor-automatic-exits
+  piece, D3): e1 flips with the caller's own reason ("changed"), e2 flips
+  with the verdict's own reason ("correction") — `history_says` reads only
+  the caller's named list, so e2's own reason is pinned directly in
+  `tests/test_auto_exits.py::test_composition_one_replace_call_both_flip`
+  instead of being forced onto a check that cannot see it.

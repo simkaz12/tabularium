@@ -1,0 +1,26 @@
+id: p8-fact-elaborates-decision-bounces
+class: admission-invalidation
+origin: authored
+existing:
+  - alias: e1
+    text: "Elaborated replacement against a Decision candidate always bounces rather than invalidating it."
+    kind: decision
+    scope: p
+    lifecycle: active
+    validity: valid
+    created_at: 2025-01-01T00:00:00Z
+incoming:
+  content: "Elaborated replacement against a Decision candidate still bounces rather than invalidating it."
+  scope: p
+  kind: fact
+expect:
+  material: elaboration
+  step: withheld
+  mutation:
+    acceptable:
+      - "rows == 1"
+      - "e1.validity == valid"
+why: >-
+  Only correction/changed can invalidate a Decision (P8
+  assessor-automatic-exits piece, D2) — an elaborated verdict bounces
+  instead, leaving the Decision valid and in_force and writing no Fact.

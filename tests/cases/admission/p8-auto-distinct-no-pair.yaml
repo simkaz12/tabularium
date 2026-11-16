@@ -1,0 +1,26 @@
+id: p8-auto-distinct-no-pair
+class: admission-auto-write
+origin: authored
+existing:
+  - alias: e1
+    text: "Automatic distinct writes the new row and registers no distinct pair at all."
+    kind: fact
+    scope: p
+    lifecycle: active
+    validity: valid
+    created_at: 2025-01-01T00:00:00Z
+incoming:
+  content: "Automatic distinct writes the new row and registers no distinct pair whatsoever."
+  scope: p
+  kind: fact
+expect:
+  material: unrelated
+  step: auto_write
+  mutation:
+    acceptable:
+      - "rows == 2"
+      - "pair(e1, incoming) not registered"
+why: >-
+  Automatic distinct writes the new row and registers no pair, the same
+  rule automatic follow_up already has (P8 assessor-automatic-exits
+  piece, D8a) — both rows exist and stay unlinked.

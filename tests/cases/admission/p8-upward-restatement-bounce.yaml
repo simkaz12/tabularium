@@ -1,0 +1,31 @@
+id: p8-upward-restatement-bounce
+class: admission-auto-restatement
+origin: authored
+existing:
+  - alias: e1
+    text: "A global save restating a named scope row bounces rather than reinforcing anything."
+    kind: fact
+    scope: p
+    lifecycle: active
+    validity: valid
+    created_at: 2025-01-01T00:00:00Z
+incoming:
+  content: "A global save restating a named scope row bounces rather than reinforcing anything at all."
+  scope: global
+  kind: fact
+expect:
+  material: repetition
+  step: auto_supersede
+  mutation:
+    acceptable:
+      - "rows == 2"
+      - "e1.superseded_by == incoming"
+why: >-
+  A4 bounce-judged piece, decision D3: upward restatement is a promotion,
+  not a perpetual bounce — with the restatement switch on (the mutation
+  axis runner's own fixed config), the incoming global content is written
+  straight through, superseding the named-scope row with reason "moved" in
+  one transaction. Retained under its original id (the case-set's own
+  "update, never rename" convention) even though the class name and the
+  outcome it now proves have both moved past the "bounce" the id still
+  names.

@@ -1,0 +1,23 @@
+id: falsity-agree-correction
+class: admission-falsity
+origin: authored
+existing:
+  - alias: e1
+    text: "The 4B conference room's projector only accepts HDMI input, never VGA."
+    kind: fact
+    scope: falsity-admission
+    lifecycle: active
+    validity: valid
+    created_at: 2024-01-01T00:00:00Z
+incoming:
+  content: "The 4B conference room's projector was always able to accept VGA input too; the HDMI-only claim came from a mislabeled port on the wall plate."
+  scope: falsity-admission
+  kind: fact
+falsity:
+  judge_a: {verdict: replace, reason: correction, why: "the older claim was wrong when written"}
+  judge_b: {verdict: replace, reason: correction, why: "the port was mislabeled from the start"}
+  expect: supersede:correction
+why: >-
+  Both judges agree on both the action AND the reason (D5's own agreement check) --
+  no Assessor call, no verdict row, the write's reason comes straight from the
+  judges (D6), never the pre-A3 hardcoded "changed".

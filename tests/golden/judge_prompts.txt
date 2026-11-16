@@ -1,0 +1,176 @@
+===== falsity: render_batch_prompt =====
+Judge each record below.
+
+Grade it by the rubric.
+
+---
+
+# Your batch — 3 records
+
+## 1.
+The deploy script restarts the unit after rsync.
+
+## 2.
+Line one of a record.
+Line two of the same record.
+
+## 3.
+A third record with a trailing space. 
+
+# Reply format
+
+Reply with one JSON object: `{"verdicts": [ ... ]}`, holding one entry per record.
+
+- The first character of your reply is `{`.
+- No code fences and no text before or after the JSON object.
+- Give one entry for each index from 1 to N, each exactly once.
+- Add no fields beyond the ones listed.
+
+Each entry has these fields:
+
+- `index` (required): a JSON integer, not a string
+- `verdict` (required): one of "coexist", "replace"
+- `reason` (optional): one of "correction", "changed"
+- `why` (required): a JSON string. What changed between O and N, or what keeps them both standing.
+- `carry` (optional): a JSON string. What of the older record still holds and the newer one does not say, in one or two sentences that read naturally appended to the newer record.
+
+- `reason` is required when `verdict` is `replace` and omitted when it is `coexist`. Use `correction` if the older record was wrong when it was written, `changed` if it was true then and what it describes has since moved on.
+- `carry` goes only when `verdict` is `replace`, and only when the older record holds a separate point that is still true and that the newer record does not say. Omit it otherwise.
+
+===== falsity: render_reply_format =====
+# Reply format
+
+Reply with one JSON object: `{"verdicts": [ ... ]}`, holding one entry per record.
+
+- The first character of your reply is `{`.
+- No code fences and no text before or after the JSON object.
+- Give one entry for each index from 1 to N, each exactly once.
+- Add no fields beyond the ones listed.
+
+Each entry has these fields:
+
+- `index` (required): a JSON integer, not a string
+- `verdict` (required): one of "coexist", "replace"
+- `reason` (optional): one of "correction", "changed"
+- `why` (required): a JSON string. What changed between O and N, or what keeps them both standing.
+- `carry` (optional): a JSON string. What of the older record still holds and the newer one does not say, in one or two sentences that read naturally appended to the newer record.
+
+- `reason` is required when `verdict` is `replace` and omitted when it is `coexist`. Use `correction` if the older record was wrong when it was written, `changed` if it was true then and what it describes has since moved on.
+- `carry` goes only when `verdict` is `replace`, and only when the older record holds a separate point that is still true and that the newer record does not say. Omit it otherwise.
+
+===== relevance: render_batch_prompt =====
+Judge each record below.
+
+Grade it by the rubric.
+
+---
+
+# Your batch — 3 records
+
+## 1.
+The deploy script restarts the unit after rsync.
+
+## 2.
+Line one of a record.
+Line two of the same record.
+
+## 3.
+A third record with a trailing space. 
+
+# Reply format
+
+Reply with one JSON object: `{"verdicts": [ ... ]}`, holding one entry per record.
+
+- The first character of your reply is `{`.
+- No code fences and no text before or after the JSON object.
+- Give one entry for each index from 1 to N, each exactly once.
+- Add no fields beyond the ones listed.
+
+Each entry has these fields:
+
+- `index` (required): a JSON integer, not a string
+- `unclear` (required): a JSON boolean, not a string
+- `grade` (required): one of "shelve-clear", "shelve-lean", "keep-lean", "keep-clear"
+- `why` (required): a JSON string. The gate question or keep-test clause that decided it.
+- `keep` (optional): a JSON string. The part of this record that still passes the gate on its own, restated as a standalone record.
+
+- `keep` goes only on a `shelve-*` grade, and only when one part of the record would pass the gate on its own. Omit it when nothing of the record survives on its own, and never put it on a `keep-*` grade.
+
+===== relevance: render_reply_format =====
+# Reply format
+
+Reply with one JSON object: `{"verdicts": [ ... ]}`, holding one entry per record.
+
+- The first character of your reply is `{`.
+- No code fences and no text before or after the JSON object.
+- Give one entry for each index from 1 to N, each exactly once.
+- Add no fields beyond the ones listed.
+
+Each entry has these fields:
+
+- `index` (required): a JSON integer, not a string
+- `unclear` (required): a JSON boolean, not a string
+- `grade` (required): one of "shelve-clear", "shelve-lean", "keep-lean", "keep-clear"
+- `why` (required): a JSON string. The gate question or keep-test clause that decided it.
+- `keep` (optional): a JSON string. The part of this record that still passes the gate on its own, restated as a standalone record.
+
+- `keep` goes only on a `shelve-*` grade, and only when one part of the record would pass the gate on its own. Omit it when nothing of the record survives on its own, and never put it on a `keep-*` grade.
+
+===== revisit: render_batch_prompt =====
+Judge each record below.
+
+Grade it by the rubric.
+
+---
+
+# Your batch — 3 records
+
+## 1.
+The deploy script restarts the unit after rsync.
+
+## 2.
+Line one of a record.
+Line two of the same record.
+
+## 3.
+A third record with a trailing space. 
+
+# Reply format
+
+Reply with one JSON object: `{"verdicts": [ ... ]}`, holding one entry per record.
+
+- The first character of your reply is `{`.
+- No code fences and no text before or after the JSON object.
+- Give one entry for each index from 1 to N, each exactly once.
+- Add no fields beyond the ones listed.
+
+Each entry has these fields:
+
+- `index` (required): a JSON integer, not a string
+- `unclear` (required): a JSON boolean, not a string
+- `grade` (required): one of "shelve-clear", "shelve-lean", "keep-lean", "keep-clear"
+- `why` (required): a JSON string. The gate question or keep-test clause that decided it.
+- `keep` (optional): a JSON string. The part of this record that still passes the gate on its own, restated as a standalone record.
+
+- `keep` goes only on a `shelve-*` grade, and only when one part of the record would pass the gate on its own. Omit it when nothing of the record survives on its own, and never put it on a `keep-*` grade.
+
+===== revisit: render_reply_format =====
+# Reply format
+
+Reply with one JSON object: `{"verdicts": [ ... ]}`, holding one entry per record.
+
+- The first character of your reply is `{`.
+- No code fences and no text before or after the JSON object.
+- Give one entry for each index from 1 to N, each exactly once.
+- Add no fields beyond the ones listed.
+
+Each entry has these fields:
+
+- `index` (required): a JSON integer, not a string
+- `unclear` (required): a JSON boolean, not a string
+- `grade` (required): one of "shelve-clear", "shelve-lean", "keep-lean", "keep-clear"
+- `why` (required): a JSON string. The gate question or keep-test clause that decided it.
+- `keep` (optional): a JSON string. The part of this record that still passes the gate on its own, restated as a standalone record.
+
+- `keep` goes only on a `shelve-*` grade, and only when one part of the record would pass the gate on its own. Omit it when nothing of the record survives on its own, and never put it on a `keep-*` grade.
+

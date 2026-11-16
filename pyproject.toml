@@ -1,0 +1,124 @@
+[project]
+name = "tabularium"
+version = "0.1.0"
+description = "Long-term memory system for LLM agents (MCP-native)"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "simkaz12", email = "126715326+simkaz12@users.noreply.github.com" }]
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic~=2.13",
+    "litellm==1.93.0",
+    "lancedb==0.34.0",
+    "mcp>=2,<3",
+    "httpx>=0.28,<1",
+]
+
+[project.urls]
+Homepage = "https://github.com/simkaz12/tabularium"
+Repository = "https://github.com/simkaz12/tabularium"
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "hypothesis",
+    "ruff",
+    "mypy",
+    "pyyaml>=6.0.3",
+    "types-pyyaml>=6.0.12.20260906",
+]
+
+[project.scripts]
+tabularium = "tabularium.cli:main"
+tabularium-mcp = "tabularium.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tabularium"]
+
+# ---------------------------------------------------------------------------
+# mypy — strict
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests", "scripts"]
+mypy_path = "src"
+# `files` is ignored when a path is passed explicitly, so a bare `uv run mypy .`
+# walks the whole tree including gitignored throwaways. `dev-corpus/` is the
+# default location for local eval data and scratch tools; it is not part of the suite.
+exclude = ["^dev-corpus/"]
+
+# LanceDB ships partial stubs (_lancedb.pyi for the Rust extension) but the
+# Python-level modules (lancedb.table, lancedb.query) are not fully annotated.
+# A scoped override suppresses import-time errors for these modules without
+# disabling strict checking on the rest of the project.
+[[tool.mypy.overrides]]
+module = [
+    "lancedb",
+    "lancedb.*",
+    "pyarrow",
+    "pyarrow.*",
+]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# ruff
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py312"
+src = ["src", "tests", "scripts"]
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "DTZ",  # flake8-datetimez — bans naive datetimes
+    "TID",  # flake8-tidy-imports
+    "ANN",  # flake8-annotations
+    "RUF",  # ruff-native rules
+]
+ignore = [
+    "ANN401",  # Any in **kw helpers is intentional in test fixtures
+]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"datetime.datetime.now" = { msg = "Use Clock.now() — datetime.datetime.now() is banned outside the clock module." }
+"datetime.datetime.utcnow" = { msg = "Use Clock.now() — datetime.datetime.utcnow() is banned outside the clock module." }
+
+[tool.ruff.lint.per-file-ignores]
+"src/tabularium/clock.py" = ["TID251"]  # clock module is the sole permitted user of datetime.now
+# Tests that verify rejection of naive datetimes must construct them intentionally.
+"tests/test_clock.py" = ["DTZ001"]
+"tests/test_domain.py" = ["DTZ001"]
+# Offline scripts: long corpus text strings cannot be split; calibration uses datetime directly.
+"scripts/freeze_vectors.py" = ["E501", "RUF001"]
+"scripts/calibrate_thresholds.py" = ["TID251"]
+"scripts/calibrate_beta_rrf.py" = ["TID251"]
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# Default suite is hermetic: integration tests (live Ollama) are deselected
+# unless explicitly requested via `-m integration`, which overrides this
+# addopts entry rather than combining with it (pytest applies the last `-m`
+# it sees, and CLI args come after addopts on the effective command line).
+addopts = ["-m", "not integration"]
+markers = [
+    "integration: tests that require live external services (e.g. Ollama)",
+    "ranked_visibility: ranked-visibility conformance property (SPEC §3.3, ADR 0017)",
+]

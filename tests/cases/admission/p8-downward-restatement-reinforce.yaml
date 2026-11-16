@@ -1,0 +1,28 @@
+id: p8-downward-restatement-reinforce
+class: admission-auto-restatement
+origin: authored
+existing:
+  - alias: e1
+    text: "A project scoped save restating a global row reinforces the global row silently."
+    kind: fact
+    scope: global
+    lifecycle: active
+    validity: valid
+    created_at: 2025-01-01T00:00:00Z
+incoming:
+  content: "A project scoped save restating a global row reinforces that global row silently."
+  scope: p
+  kind: fact
+expect:
+  material: repetition
+  step: auto_reinforce
+  mutation:
+    acceptable:
+      - "rows == 1"
+      - "e1.text unchanged"
+why: >-
+  Downward restatement (project row restating a global one) reinforces
+  automatically with the switch on (P8 assessor-automatic-exits piece,
+  D2/D6) — the same silent-merge direction P7's own exact-key step
+  already gives; here the serial probe and the Assessor's own verdict
+  reach it instead.

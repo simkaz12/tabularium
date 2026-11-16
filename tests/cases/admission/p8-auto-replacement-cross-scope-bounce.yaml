@@ -1,0 +1,28 @@
+id: p8-auto-replacement-cross-scope-bounce
+class: admission-auto-replacement
+origin: authored
+existing:
+  - alias: e1
+    text: "Cross scope replacement is withheld because the candidate sits outside the successor's own scope."
+    kind: fact
+    scope: global
+    lifecycle: active
+    validity: valid
+    created_at: 2025-01-01T00:00:00Z
+incoming:
+  content: "Cross scope replacement stays withheld because the candidate sits outside the successor's own scope."
+  scope: p
+  kind: fact
+expect:
+  material: changed state
+  step: withheld
+  mutation:
+    acceptable:
+      - "rows == 1"
+      - "e1.text unchanged"
+      - "e1.validity == valid"
+why: >-
+  A replacement verdict against a candidate outside the successor's own
+  scope is withheld regardless of the switch (P8 assessor-automatic-exits
+  piece, D2's cross-scope-replacement rule) — the global candidate is left
+  exactly as it was and nothing new lands.

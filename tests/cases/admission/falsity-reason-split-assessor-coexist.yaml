@@ -1,0 +1,25 @@
+id: falsity-reason-split-assessor-coexist
+class: admission-falsity
+origin: authored
+existing:
+  - alias: e1
+    text: "The on-call escalation contact for the payments pipeline is the platform team's pager rotation."
+    kind: fact
+    scope: falsity-admission
+    lifecycle: active
+    validity: valid
+    created_at: 2024-01-01T00:00:00Z
+incoming:
+  content: "The on-call escalation contact for the payments pipeline is now the reliability team's pager rotation, after ownership moved off the platform team."
+  scope: falsity-admission
+  kind: fact
+falsity:
+  judge_a: {verdict: replace, reason: correction, why: "platform team was never the right owner"}
+  judge_b: {verdict: replace, reason: changed, why: "ownership moved to reliability"}
+  assessor: coexist
+  expect: contested
+why: >-
+  D11: the Assessor supplies no reason for a reason disagreement -- a coexist
+  pick against a reason-disagreement pair is forbidden to guess a reason
+  from, so the pair stays contested, no write, rather than being forced
+  into either judge's own reason.

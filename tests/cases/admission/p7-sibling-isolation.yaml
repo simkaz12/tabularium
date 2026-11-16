@@ -1,0 +1,24 @@
+id: p7-sibling-isolation
+class: admission-probe-span
+origin: authored
+existing:
+  - alias: e1
+    text: "Sibling named scopes never probe each other; a project scope's probe span is itself plus global only."
+    kind: fact
+    scope: p
+    lifecycle: active
+    validity: valid
+    created_at: 2025-01-01T00:00:00Z
+incoming:
+  content: "Sibling named scopes never probe each other; a project scope's probe span is itself plus global only."
+  scope: q
+  kind: fact
+expect:
+  material: repetition
+  mutation:
+    acceptable:
+      - "rows == 2"
+why: >-
+  Two named scopes, both siblings of global, are outside each other's probe
+  span (P7 admission-order piece): the restatement
+  lands as a second, unlinked row.

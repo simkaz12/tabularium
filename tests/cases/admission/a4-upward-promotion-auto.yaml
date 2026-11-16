@@ -1,0 +1,38 @@
+id: a4-upward-promotion-auto
+class: admission-auto-restatement
+origin: authored
+existing:
+  - alias: e1
+    text: "The clean-picture rule composes every survivor that legally promotes into one moved set."
+    kind: fact
+    scope: p
+    lifecycle: active
+    validity: valid
+    created_at: 2025-01-01T00:00:00Z
+  - alias: e2
+    text: "The clean-picture rule composes every survivor that legally promotes into a single moved set."
+    kind: fact
+    scope: q
+    lifecycle: active
+    validity: valid
+    created_at: 2025-01-01T00:00:00Z
+incoming:
+  content: "The clean-picture rule composes every survivor that legally promotes into one shared moved set."
+  scope: global
+  kind: fact
+expect:
+  material: repetition
+  step: auto_supersede
+  mutation:
+    acceptable:
+      - "rows == 3"
+      - "e1.superseded_by == incoming"
+      - "e2.superseded_by == incoming"
+why: >-
+  A4 bounce-judged piece, decision D3/D11: two named-scope survivors (p and
+  q) both restating an incoming global text, switch on — both supersede
+  with reason "moved" in one composed replace, not just the closer one
+  (P8's own top-only dispatch would have superseded exactly one and left
+  the other's competing verdict silently discarded). e1/e2 sit in
+  different scopes so seeding the second never itself dispatches against
+  the first (a same-scope probe never crosses named scopes).

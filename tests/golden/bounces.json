@@ -1,0 +1,361 @@
+{
+ "decision_promoted_from": {
+  "bounce": {
+   "bounce_id": "<uuid-1>",
+   "bounce_kind": "decision",
+   "candidate_content": "the quick brown fox jumps over the lazy dog",
+   "candidate_id": "<uuid-2>",
+   "candidate_scope": "p",
+   "exits": [
+    {
+     "action": "reinforce",
+     "how": "save(resolve={\"candidate_id\": \"<uuid-2>\", \"action\": \"reinforce\", \"bounce_id\": \"<uuid-1>\"})",
+     "when": "the candidate already carries your claim whole; across kinds this is rare — a Fact recording what a Decision caused is usually distinct, not redundant"
+    },
+    {
+     "action": "confirm_distinct",
+     "how": "save(resolve={\"candidate_id\": \"<uuid-2>\", \"action\": \"confirm_distinct\", \"bounce_id\": \"<uuid-1>\"})",
+     "when": "a Fact recording a consequence and the Decision that caused it are different records; the shared vocabulary is expected and is not redundancy"
+    },
+    {
+     "action": "promoted_from",
+     "how": "save(kind=\"decision\", content=…, promoted_from=[\"<uuid-2>\"], bounce_id=\"<uuid-1>\")",
+     "when": "the candidate is the observation your decision rests on, and yours names what was chosen against what was rejected (SPEC §1.4's road-not-taken test)"
+    }
+   ],
+   "guard_flag": null,
+   "judged": null,
+   "other_candidates": [],
+   "similarity": 0.9961946980917455,
+   "verdict": "near_dup",
+   "withheld": null
+  },
+  "embedded": true,
+  "escalation_suggestion": null,
+  "hypomnema": null,
+  "outcome": "bounced",
+  "reason": null,
+  "reinforced_id": null
+ },
+ "decision_three_exits": {
+  "bounce": {
+   "bounce_id": "<uuid-3>",
+   "bounce_kind": "decision",
+   "candidate_content": "the quick brown fox jumps over the lazy dog",
+   "candidate_id": "<uuid-4>",
+   "candidate_scope": "p",
+   "exits": [
+    {
+     "action": "reinforce",
+     "how": "save(resolve={\"candidate_id\": \"<uuid-4>\", \"action\": \"reinforce\", \"bounce_id\": \"<uuid-3>\"})",
+     "when": "yours restates the candidate and adds nothing a reader would miss — no new subject, no new qualifier, no changed value"
+    },
+    {
+     "action": "confirm_distinct",
+     "how": "save(resolve={\"candidate_id\": \"<uuid-4>\", \"action\": \"confirm_distinct\", \"bounce_id\": \"<uuid-3>\"})",
+     "when": "both stand — they read alike because they share a subject, not because either repeats the other; the common case when several atoms come out of one design session"
+    },
+    {
+     "action": "supersede",
+     "how": "save(kind=\"decision\", content=…, supersedes=\"<uuid-4>\", reason=\"changed\", bounce_id=\"<uuid-3>\")",
+     "when": "same question, different answer — the candidate's answer is the one yours replaces, not merely one yours sits beside"
+    }
+   ],
+   "guard_flag": null,
+   "judged": null,
+   "other_candidates": [],
+   "similarity": 0.9961946980917455,
+   "verdict": "decision_adjacent",
+   "withheld": null
+  },
+  "embedded": true,
+  "escalation_suggestion": null,
+  "hypomnema": null,
+  "outcome": "bounced",
+  "reason": null,
+  "reinforced_id": null
+ },
+ "decision_upward_promotion": {
+  "bounce": {
+   "bounce_id": "<uuid-5>",
+   "bounce_kind": "decision",
+   "candidate_content": "the quick brown fox jumps over the lazy dog",
+   "candidate_id": "<uuid-6>",
+   "candidate_scope": "p",
+   "exits": [
+    {
+     "action": "supersede",
+     "how": "save(kind=\"decision\", content=…, scope=\"global\", supersedes=\"<uuid-6>\", reason=\"moved\", bounce_id=\"<uuid-5>\")",
+     "when": "the p row says what yours says, and the claim holds beyond p — yours becomes the one copy and that row is kept as moved"
+    },
+    {
+     "action": "confirm_distinct",
+     "how": "save(resolve={\"candidate_id\": \"<uuid-6>\", \"action\": \"confirm_distinct\", \"bounce_id\": \"<uuid-5>\"})",
+     "when": "both stand — they read alike because they share a subject, not because either repeats the other; the common case when several atoms come out of one design session"
+    }
+   ],
+   "guard_flag": null,
+   "judged": {
+    "relation": {
+     "confidence": 1.0,
+     "odds": {
+      "restatement": 1.0
+     },
+     "pick": "restatement",
+     "reason_class": null,
+     "status": "verdict"
+    }
+   },
+   "other_candidates": [],
+   "similarity": 0.9961946980917455,
+   "verdict": "decision_adjacent",
+   "withheld": "switch_off"
+  },
+  "embedded": true,
+  "escalation_suggestion": null,
+  "hypomnema": null,
+  "outcome": "bounced",
+  "reason": null,
+  "reinforced_id": null
+ },
+ "fact_switch_off_judged": {
+  "bounce": {
+   "bounce_id": "<uuid-7>",
+   "bounce_kind": "fact",
+   "candidate_content": "the quick brown fox jumps over the lazy dog",
+   "candidate_id": "<uuid-8>",
+   "candidate_scope": "p",
+   "exits": [
+    {
+     "action": "reinforce",
+     "how": "save(resolve={\"candidate_id\": \"<uuid-8>\", \"action\": \"reinforce\", \"bounce_id\": \"<uuid-7>\"})",
+     "when": "yours restates the candidate and adds nothing a reader would miss — no new subject, no new qualifier, no changed value"
+    },
+    {
+     "action": "confirm_distinct",
+     "how": "save(resolve={\"candidate_id\": \"<uuid-8>\", \"action\": \"confirm_distinct\", \"bounce_id\": \"<uuid-7>\"})",
+     "when": "both stand — they read alike because they share a subject, not because either repeats the other; the common case when several atoms come out of one design session"
+    },
+    {
+     "action": "supersede",
+     "how": "save(kind=\"fact\", content=…, supersedes=[\"<uuid-8>\"], reason=\"changed\", bounce_id=\"<uuid-7>\")",
+     "when": "the candidate was true and yours is what made it false — same claim at a later state, not a different aspect of it, and not a report that disputes it without replacing it"
+    }
+   ],
+   "guard_flag": null,
+   "judged": {
+    "relation": {
+     "confidence": 1.0,
+     "odds": {
+      "restatement": 1.0
+     },
+     "pick": "restatement",
+     "reason_class": null,
+     "status": "verdict"
+    }
+   },
+   "other_candidates": [],
+   "similarity": 0.9961946980917455,
+   "verdict": "near_dup",
+   "withheld": "switch_off"
+  },
+  "embedded": true,
+  "escalation_suggestion": null,
+  "hypomnema": null,
+  "outcome": "bounced",
+  "reason": null,
+  "reinforced_id": null
+ },
+ "fact_three_exits": {
+  "bounce": {
+   "bounce_id": "<uuid-9>",
+   "bounce_kind": "fact",
+   "candidate_content": "the quick brown fox jumps over the lazy dog",
+   "candidate_id": "<uuid-10>",
+   "candidate_scope": "p",
+   "exits": [
+    {
+     "action": "reinforce",
+     "how": "save(resolve={\"candidate_id\": \"<uuid-10>\", \"action\": \"reinforce\", \"bounce_id\": \"<uuid-9>\"})",
+     "when": "yours restates the candidate and adds nothing a reader would miss — no new subject, no new qualifier, no changed value"
+    },
+    {
+     "action": "confirm_distinct",
+     "how": "save(resolve={\"candidate_id\": \"<uuid-10>\", \"action\": \"confirm_distinct\", \"bounce_id\": \"<uuid-9>\"})",
+     "when": "both stand — they read alike because they share a subject, not because either repeats the other; the common case when several atoms come out of one design session"
+    },
+    {
+     "action": "supersede",
+     "how": "save(kind=\"fact\", content=…, supersedes=[\"<uuid-10>\"], reason=\"changed\", bounce_id=\"<uuid-9>\")",
+     "when": "the candidate was true and yours is what made it false — same claim at a later state, not a different aspect of it, and not a report that disputes it without replacing it"
+    }
+   ],
+   "guard_flag": null,
+   "judged": null,
+   "other_candidates": [],
+   "similarity": 0.9961946980917455,
+   "verdict": "near_dup",
+   "withheld": null
+  },
+  "embedded": true,
+  "escalation_suggestion": null,
+  "hypomnema": null,
+  "outcome": "bounced",
+  "reason": null,
+  "reinforced_id": null
+ },
+ "fact_two_exits": {
+  "bounce": {
+   "bounce_id": "<uuid-11>",
+   "bounce_kind": "fact",
+   "candidate_content": "the quick brown fox jumps over the lazy dog",
+   "candidate_id": "<uuid-12>",
+   "candidate_scope": "p",
+   "exits": [
+    {
+     "action": "reinforce",
+     "how": "save(resolve={\"candidate_id\": \"<uuid-12>\", \"action\": \"reinforce\", \"bounce_id\": \"<uuid-11>\"})",
+     "when": "the candidate already carries your claim whole; across kinds this is rare — a Fact recording what a Decision caused is usually distinct, not redundant"
+    },
+    {
+     "action": "confirm_distinct",
+     "how": "save(resolve={\"candidate_id\": \"<uuid-12>\", \"action\": \"confirm_distinct\", \"bounce_id\": \"<uuid-11>\"})",
+     "when": "a Fact recording a consequence and the Decision that caused it are different records; the shared vocabulary is expected and is not redundancy"
+    }
+   ],
+   "guard_flag": null,
+   "judged": null,
+   "other_candidates": [],
+   "similarity": 0.9961946980917455,
+   "verdict": "decision_adjacent",
+   "withheld": null
+  },
+  "embedded": true,
+  "escalation_suggestion": null,
+  "hypomnema": null,
+  "outcome": "bounced",
+  "reason": null,
+  "reinforced_id": null
+ },
+ "fact_upward_promotion": {
+  "bounce": {
+   "bounce_id": "<uuid-13>",
+   "bounce_kind": "fact",
+   "candidate_content": "the quick brown fox jumps over the lazy dog",
+   "candidate_id": "<uuid-14>",
+   "candidate_scope": "p",
+   "exits": [
+    {
+     "action": "supersede",
+     "how": "save(kind=\"fact\", content=…, scope=\"global\", supersedes=[\"<uuid-14>\"], reason=\"moved\", bounce_id=\"<uuid-13>\")",
+     "when": "the p row says what yours says, and the claim holds beyond p — yours becomes the one copy and that row is kept as moved"
+    },
+    {
+     "action": "confirm_distinct",
+     "how": "save(resolve={\"candidate_id\": \"<uuid-14>\", \"action\": \"confirm_distinct\", \"bounce_id\": \"<uuid-13>\"})",
+     "when": "both stand — they read alike because they share a subject, not because either repeats the other; the common case when several atoms come out of one design session"
+    }
+   ],
+   "guard_flag": null,
+   "judged": {
+    "relation": {
+     "confidence": 1.0,
+     "odds": {
+      "restatement": 1.0
+     },
+     "pick": "restatement",
+     "reason_class": null,
+     "status": "verdict"
+    }
+   },
+   "other_candidates": [],
+   "similarity": 0.9961946980917455,
+   "verdict": "near_dup",
+   "withheld": "switch_off"
+  },
+  "embedded": true,
+  "escalation_suggestion": null,
+  "hypomnema": null,
+  "outcome": "bounced",
+  "reason": null,
+  "reinforced_id": null
+ },
+ "judge_unavailable_decision": {
+  "bounce": {
+   "bounce_id": "<uuid-15>",
+   "bounce_kind": "decision",
+   "candidate_content": "alpha bravo charlie delta echo",
+   "candidate_id": "<uuid-16>",
+   "candidate_scope": "p",
+   "exits": [
+    {
+     "action": "confirm_distinct",
+     "how": "save(resolve={\"candidate_id\": \"<uuid-16>\", \"action\": \"confirm_distinct\", \"bounce_id\": \"<uuid-15>\"})",
+     "when": "the Assessor is unavailable; judge for yourself whether this is distinct"
+    },
+    {
+     "action": "reinforce",
+     "how": "save(resolve={\"candidate_id\": \"<uuid-16>\", \"action\": \"reinforce\", \"bounce_id\": \"<uuid-15>\"})",
+     "when": "the Assessor is unavailable; judge for yourself whether this restates it"
+    }
+   ],
+   "guard_flag": null,
+   "judged": {
+    "relation": {
+     "detail": null,
+     "reason": "absent",
+     "status": "unavailable"
+    }
+   },
+   "other_candidates": [],
+   "similarity": null,
+   "verdict": "near_dup",
+   "withheld": null
+  },
+  "embedded": true,
+  "escalation_suggestion": null,
+  "hypomnema": null,
+  "outcome": "bounced",
+  "reason": "judge_unavailable",
+  "reinforced_id": null
+ },
+ "judge_unavailable_fact": {
+  "bounce": {
+   "bounce_id": "<uuid-17>",
+   "bounce_kind": "fact",
+   "candidate_content": "alpha bravo charlie delta echo",
+   "candidate_id": "<uuid-18>",
+   "candidate_scope": "p",
+   "exits": [
+    {
+     "action": "confirm_distinct",
+     "how": "save(resolve={\"candidate_id\": \"<uuid-18>\", \"action\": \"confirm_distinct\", \"bounce_id\": \"<uuid-17>\"})",
+     "when": "the Assessor is unavailable; judge for yourself whether this is distinct"
+    },
+    {
+     "action": "reinforce",
+     "how": "save(resolve={\"candidate_id\": \"<uuid-18>\", \"action\": \"reinforce\", \"bounce_id\": \"<uuid-17>\"})",
+     "when": "the Assessor is unavailable; judge for yourself whether this restates it"
+    }
+   ],
+   "guard_flag": null,
+   "judged": {
+    "relation": {
+     "detail": null,
+     "reason": "absent",
+     "status": "unavailable"
+    }
+   },
+   "other_candidates": [],
+   "similarity": null,
+   "verdict": "near_dup",
+   "withheld": null
+  },
+  "embedded": true,
+  "escalation_suggestion": null,
+  "hypomnema": null,
+  "outcome": "bounced",
+  "reason": "judge_unavailable",
+  "reinforced_id": null
+ }
+}

@@ -1,0 +1,29 @@
+id: p8-invalidation-fault
+class: admission-invalidation-fault
+origin: authored
+existing:
+  - alias: e1
+    text: "A fault on the invalidation transaction leaves the Decision valid and writes no Fact at all."
+    kind: decision
+    scope: p
+    lifecycle: active
+    validity: valid
+    created_at: 2025-01-01T00:00:00Z
+incoming:
+  content: "A fault on the invalidation transaction leaves the Decision valid and writes no Fact whatsoever."
+  scope: p
+  kind: fact
+expect:
+  material: correction
+  mutation:
+    acceptable:
+      - "rows == 1"
+      - "e1.validity == valid"
+fault:
+  "on": replace
+  call: 1
+why: >-
+  A fault on the one replace call that would invalidate the Decision and
+  insert the Fact leaves neither landed (P8 assessor-automatic-exits
+  piece, D13's both-or-neither guarantee) — the Decision stays valid and
+  no Fact exists.

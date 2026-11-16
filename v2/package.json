@@ -1,0 +1,31 @@
+{
+  "name": "tabularium-v2",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@lancedb/lancedb": "0.41.0",
+    "@typesafe-ai/sdk": "0.7.0",
+    "apache-arrow": "18.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "license": "MIT",
+  "author": "simkaz12 <126715326+simkaz12@users.noreply.github.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/simkaz12/tabularium.git",
+    "directory": "v2"
+  }
+}

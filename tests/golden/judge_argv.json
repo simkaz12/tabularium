@@ -1,0 +1,49 @@
+{
+ "claude_with_grant": [
+  "/usr/bin/claude",
+  "-p",
+  "--model",
+  "golden-model",
+  "--mcp-config",
+  "{\"mcpServers\": {\"tabularium\": {\"type\": \"http\", \"url\": \"http://127.0.0.1:8765/mcp\"}}}",
+  "--strict-mcp-config",
+  "--allowed-tools",
+  "mcp__tabularium__recall",
+  "mcp__tabularium__context",
+  "--disallowed-tools",
+  "mcp__tabularium__recall"
+ ],
+ "claude_without_grant": [
+  "/usr/bin/claude",
+  "-p",
+  "--model",
+  "golden-model",
+  "--allowed-tools",
+  ""
+ ],
+ "codex_with_grant": [
+  "/usr/bin/codex",
+  "exec",
+  "--skip-git-repo-check",
+  "--ignore-user-config",
+  "-c",
+  "mcp_servers.tabularium.url=\"http://127.0.0.1:8765/mcp\"",
+  "-c",
+  "mcp_servers.tabularium.enabled_tools=[\"recall\", \"context\"]",
+  "-c",
+  "mcp_servers.tabularium.disabled_tools=[\"recall\"]",
+  "--output-last-message",
+  "<outfile>",
+  "-m",
+  "golden-model"
+ ],
+ "codex_without_grant": [
+  "/usr/bin/codex",
+  "exec",
+  "--skip-git-repo-check",
+  "--output-last-message",
+  "<outfile>",
+  "-m",
+  "golden-model"
+ ]
+}

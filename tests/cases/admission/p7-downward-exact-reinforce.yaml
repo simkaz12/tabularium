@@ -1,0 +1,25 @@
+id: p7-downward-exact-reinforce
+class: admission-exact-key
+origin: authored
+existing:
+  - alias: e1
+    text: "The cross-tier direction rule reinforces silently when a named-scope save restates a global row."
+    kind: fact
+    scope: global
+    lifecycle: active
+    validity: valid
+    created_at: 2025-01-01T00:00:00Z
+incoming:
+  content: "The cross-tier direction rule reinforces silently when a named-scope save restates a global row."
+  scope: p
+  kind: fact
+expect:
+  material: repetition
+  mutation:
+    acceptable:
+      - "rows == 1"
+      - "e1.text unchanged"
+why: >-
+  A named-scope save restating a global row is the downward direction (P7
+  admission-order piece): it reinforces the global row
+  silently, no bounce.

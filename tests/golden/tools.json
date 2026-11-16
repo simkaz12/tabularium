@@ -1,0 +1,996 @@
+{
+ "instructions": "Read-only archive of pre-v2 memory. This server accepts no writes. ``recall`` retrieves memories and ``decision`` / ``decisions_query`` navigate architectural decisions; ``context`` returns the session-start payload. Propose new facts and decisions through T3 Code's ``memory_propose``.",
+ "tools": [
+  {
+   "_meta": null,
+   "annotations": {
+    "destructiveHint": null,
+    "idempotentHint": null,
+    "openWorldHint": null,
+    "readOnlyHint": true,
+    "title": null
+   },
+   "description": "Compose the session-start grounding payload: two packed tiers (``hot`` Facts, then ``ember``) sized to a token ``budget``. Decisions are not included — reach them on demand via ``decisions_query`` / ``decision``. A registered-but-empty scope returns both tiers present and empty, not an error. ``role`` IS REQUIRED — omitting it (or passing null) is a ``ToolError`` naming every registered role; there is no default profile to fall back to (``\"default\"`` is retired — curation block task 07: an unspecified audience is a caller bug, not a state this tool resolves silently, since omitting it used to return an empty payload with no error at all). ``role`` is validated against the role registry AND filters both tiers (routing, not boosting, explicit enumeration only): a candidate reaches this call's payload only when ``role`` is named in its ``audience_hint``. An empty or NULL hint reaches NO role. ``for everyone`` is spelled by naming all four roles (``decider``/``builder``/``reviewer``/``navigator``), never by omission. This never affects ``recall`` — audience routing stays push-only.",
+   "execution": null,
+   "icons": null,
+   "inputSchema": {
+    "properties": {
+     "budget": {
+      "minimum": 0,
+      "title": "Budget",
+      "type": "integer"
+     },
+     "role": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Role"
+     },
+     "scope": {
+      "title": "Scope",
+      "type": "string"
+     }
+    },
+    "required": [
+     "scope",
+     "budget"
+    ],
+    "title": "contextArguments",
+    "type": "object"
+   },
+   "name": "context",
+   "outputSchema": {
+    "$defs": {
+     "CleanerContextSummary": {
+      "description": "A short, BOUNDED rendering of the last Cleaner pass for one scope\n(2026-08-10 cleaner plan) — carried on ``ContextPayload.cleaner``\nso a session-start caller sees \"what happened last time\" without a\nsecond round trip.\n\nDeliberately small: this competes with grounding for the session-start\nbudget, and the tiers above are what the payload is actually for. The\nfull report (every judge pair, every id, every band count) stays in the\n``report`` column (``engine.report.CleanerReport``) for anyone who asks\n— ``recall``/``decisions_query`` are the on-demand path, this is not it.\n\n``owner_attention`` is capped at ``rubric.parameters.report_render_cap``\nentries (``engine.report.render_context_summary``) — a pass with\nhundreds of unclear/contradicted/failed items never turns into hundreds\nof lines here; an overflow marker is appended instead of the remainder.\n\n``outcome=\"errored\"`` (2026-08-10 cleaner plan follow-up) is a\nTHIRD value: the pass crashed before ``engine.clean.clean`` ever reached\nits own ``\"completed\"``/``\"blocked\"`` write — distinct from both of\nthose (an axis genuinely ran) and from ``ContextPayload.cleaner`` being\n``None`` entirely (the scope has never been cleaned at all — see\n``engine.report.load_context_summary``).\n\n``outcome`` widened to the full five-value set (cleaner-telemetry change):\n``\"initialized\"``/``\"empty_pool\"`` join ``\"completed\"``/``\"blocked\"``/``\"errored\"`` because\nthis now renders the newest row of the append-only pass history whatever outcome it carries,\nrather than the (pre-existing) ``CleanerState.report``, which the `initialized`/\n`empty_pool` outcomes never wrote to at all — a pass that judged nothing used to render as\n``None`` here; now it renders as itself, distinguishably from every other outcome, so a run of\nconsecutive empty passes (the trigger silently stopped firing) is visible at session start.\n\n``blocked_streak`` counts the consecutive newest non-dry-run pass rows whose outcome is\n``\"blocked\"`` or ``\"errored\"``; ``blocked_since`` is the ``pass_at`` of the oldest row in that\nstreak. ``0`` and ``None`` when the newest row is neither.",
+      "properties": {
+       "blocked_since": {
+        "anyOf": [
+         {
+          "format": "date-time",
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Blocked Since"
+       },
+       "blocked_streak": {
+        "default": 0,
+        "title": "Blocked Streak",
+        "type": "integer"
+       },
+       "outcome": {
+        "enum": [
+         "initialized",
+         "empty_pool",
+         "completed",
+         "blocked",
+         "errored"
+        ],
+        "title": "Outcome",
+        "type": "string"
+       },
+       "owner_attention": {
+        "default": [],
+        "items": {
+         "type": "string"
+        },
+        "title": "Owner Attention",
+        "type": "array"
+       },
+       "pass_at": {
+        "format": "date-time",
+        "title": "Pass At",
+        "type": "string"
+       },
+       "scope": {
+        "title": "Scope",
+        "type": "string"
+       },
+       "summary_line": {
+        "title": "Summary Line",
+        "type": "string"
+       }
+      },
+      "required": [
+       "scope",
+       "pass_at",
+       "outcome",
+       "summary_line"
+      ],
+      "title": "CleanerContextSummary",
+      "type": "object"
+     },
+     "Fact": {
+      "additionalProperties": false,
+      "description": "A Fact: decaying, feedback-tracked, lifecycle-active record.",
+      "properties": {
+       "agent_recurrence_count": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Agent Recurrence Count",
+        "type": "integer"
+       },
+       "audience_hint": {
+        "anyOf": [
+         {
+          "items": {
+           "type": "string"
+          },
+          "type": "array"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Audience Hint"
+       },
+       "content": {
+        "title": "Content",
+        "type": "string"
+       },
+       "created_at": {
+        "format": "date-time",
+        "title": "Created At",
+        "type": "string"
+       },
+       "decay_due_at": {
+        "anyOf": [
+         {
+          "format": "date-time",
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Decay Due At"
+       },
+       "embedding_model": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Embedding Model"
+       },
+       "escalation_baseline": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Escalation Baseline",
+        "type": "integer"
+       },
+       "feedback_score": {
+        "default": 0.0,
+        "title": "Feedback Score",
+        "type": "number"
+       },
+       "hot_rejection_count": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Hot Rejection Count",
+        "type": "integer"
+       },
+       "id": {
+        "format": "uuid",
+        "title": "Id",
+        "type": "string"
+       },
+       "last_referenced_at": {
+        "anyOf": [
+         {
+          "format": "date-time",
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Last Referenced At"
+       },
+       "lifecycle": {
+        "enum": [
+         "active",
+         "hot",
+         "ember",
+         "archived",
+         "shelved"
+        ],
+        "title": "Lifecycle",
+        "type": "string"
+       },
+       "owner_recurrence_count": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Owner Recurrence Count",
+        "type": "integer"
+       },
+       "previous_content": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Previous Content"
+       },
+       "provisional": {
+        "default": false,
+        "title": "Provisional",
+        "type": "boolean"
+       },
+       "purpose": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Purpose"
+       },
+       "recall_count": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Recall Count",
+        "type": "integer"
+       },
+       "reconciles": {
+        "anyOf": [
+         {
+          "format": "uuid",
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Reconciles"
+       },
+       "scope": {
+        "title": "Scope",
+        "type": "string"
+       },
+       "source": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Source"
+       },
+       "superseded_by": {
+        "anyOf": [
+         {
+          "format": "uuid",
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Superseded By"
+       },
+       "supersession_edge_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Supersession Edge Id"
+       },
+       "supersession_note": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Supersession Note"
+       },
+       "supersession_reason": {
+        "anyOf": [
+         {
+          "enum": [
+           "correction",
+           "changed",
+           "elaborated",
+           "moved"
+          ],
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Supersession Reason"
+       },
+       "type": {
+        "const": "fact",
+        "default": "fact",
+        "title": "Type",
+        "type": "string"
+       },
+       "updated_at": {
+        "format": "date-time",
+        "title": "Updated At",
+        "type": "string"
+       },
+       "valence": {
+        "anyOf": [
+         {
+          "enum": [
+           "correction",
+           "guideline"
+          ],
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Valence"
+       },
+       "validity": {
+        "default": "valid",
+        "enum": [
+         "valid",
+         "invalid"
+        ],
+        "title": "Validity",
+        "type": "string"
+       }
+      },
+      "required": [
+       "id",
+       "content",
+       "scope",
+       "created_at",
+       "updated_at",
+       "lifecycle"
+      ],
+      "title": "Fact",
+      "type": "object"
+     },
+     "PackedTier": {
+      "description": "One tier after packing (SPEC §7 mechanics: greedy whole-entry fill,\nwaterfall spill, never truncate — see ``engine.context.pack`` for the\nfull spill mechanics).\n\n``entries``: the whole, unmodified records admitted into this tier's\nbudget. ``budget_used``: total counter cost of the admitted entries.\n``skipped``: count of entries that did not fit and were omitted whole\n(never partially included).",
+      "properties": {
+       "budget_used": {
+        "default": 0,
+        "title": "Budget Used",
+        "type": "integer"
+       },
+       "entries": {
+        "items": {
+         "$ref": "#/$defs/Fact"
+        },
+        "title": "Entries",
+        "type": "array"
+       },
+       "name": {
+        "title": "Name",
+        "type": "string"
+       },
+       "skipped": {
+        "default": 0,
+        "title": "Skipped",
+        "type": "integer"
+       }
+      },
+      "required": [
+       "name"
+      ],
+      "title": "PackedTier",
+      "type": "object"
+     }
+    },
+    "description": "Result of ``engine.context.pack`` (SPEC §7).\n\n``budget_used`` and ``skipped`` are the totals across all tiers (each\nalso observable per-tier on ``PackedTier``) — the packer's headline\nobservability contract (the acceptance criteria).\n\n``cleaner``: the requested scope's last Cleaner pass, rendered small\n(2026-08-10 cleaner plan) — ``None`` when the scope has never\nhad a completed or blocked pass (never judged, or only ever\ninitialized/empty). Additive: a scope with no Cleaner state gets\n``cleaner=None`` and every other field is exactly what ``pack`` already\nproduced — selection, ranking and the token-budget accounting in\n``tiers``/``budget_used``/``skipped`` are entirely unaffected by this\nfield's presence.",
+    "properties": {
+     "budget_used": {
+      "default": 0,
+      "title": "Budget Used",
+      "type": "integer"
+     },
+     "cleaner": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/CleanerContextSummary"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     },
+     "skipped": {
+      "default": 0,
+      "title": "Skipped",
+      "type": "integer"
+     },
+     "tiers": {
+      "items": {
+       "$ref": "#/$defs/PackedTier"
+      },
+      "title": "Tiers",
+      "type": "array"
+     }
+    },
+    "title": "ContextPayload",
+    "type": "object"
+   },
+   "title": null
+  },
+  {
+   "_meta": null,
+   "annotations": {
+    "destructiveHint": null,
+    "idempotentHint": null,
+    "openWorldHint": null,
+    "readOnlyHint": true,
+    "title": null
+   },
+   "description": "Return the full view of a single Decision by id. Includes live stats (recall_count, last_referenced_at), lineage (supersedes / superseded_by / tip), invalidation cause and class (``invalidated_by`` / ``invalidation_reason``, both null when valid), the list of past ``revalidations``, and the byte-stable rendered text (identical to what ``decision://{id}`` serves).",
+   "execution": null,
+   "icons": null,
+   "inputSchema": {
+    "properties": {
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "title": "decisionArguments",
+    "type": "object"
+   },
+   "name": "decision",
+   "outputSchema": {
+    "$defs": {
+     "RevalidationRecord": {
+      "description": "One past revalidation of a Decision (P9 invalid-Decision read contract,\ndecision D8) — a results-layer model built from the storage\n``RevalidationEvent`` (``storage.types.RevalidationEvent``), never the\nstorage type exposed on the API.\n\n``withdrawn_cause``: the Fact id whose invalidation this revalidation\nwithdrew. ``withdrawn_reason``: that invalidation's own reason class.\n``reason``: the caller's own audit-trail justification for revalidating,\ndistinct from ``withdrawn_reason``.",
+      "properties": {
+       "at": {
+        "format": "date-time",
+        "title": "At",
+        "type": "string"
+       },
+       "reason": {
+        "title": "Reason",
+        "type": "string"
+       },
+       "withdrawn_cause": {
+        "format": "uuid",
+        "title": "Withdrawn Cause",
+        "type": "string"
+       },
+       "withdrawn_reason": {
+        "enum": [
+         "correction",
+         "changed"
+        ],
+        "title": "Withdrawn Reason",
+        "type": "string"
+       }
+      },
+      "required": [
+       "withdrawn_cause",
+       "withdrawn_reason",
+       "reason",
+       "at"
+      ],
+      "title": "RevalidationRecord",
+      "type": "object"
+     }
+    },
+    "description": "Full view returned by the ``decision`` tool (SPEC §9.1).\n\nIncludes live stats (recall_count, last_referenced_at) and tip (derived\nlive end of the chain).  ``rendered`` is byte-identical to what the\n``decision://{id}`` resource will serve — one render function, two exposures.\n\n``supersedes``: the id of the immediate predecessor (chain[-1].id), or\n``None`` if this decision has no backward chain.\n\n``tip``: the live end of the chain, derived by following ``superseded_by``\npointers.  ``None`` when this decision IS the live end (i.e. self is the\ntip); the id of the live end otherwise.\n\n``promoted_from``: list of ember ids that were promoted into this decision,\nor ``None`` if empty.\n\n``invalidated_by``/``invalidation_reason``: the Fact id and reason class\nof the current invalidation (P8), or both ``None`` when valid or never\ninvalidated. ``revalidations``: every past revalidation, oldest first (P9\ninvalid-Decision read contract, decision D8) — empty when none happened.",
+    "properties": {
+     "content": {
+      "title": "Content",
+      "type": "string"
+     },
+     "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+     },
+     "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+     },
+     "invalidated_by": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Invalidated By"
+     },
+     "invalidation_reason": {
+      "anyOf": [
+       {
+        "enum": [
+         "correction",
+         "changed"
+        ],
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Invalidation Reason"
+     },
+     "last_referenced_at": {
+      "anyOf": [
+       {
+        "format": "date-time",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Referenced At"
+     },
+     "lifecycle": {
+      "enum": [
+       "in_force",
+       "superseded",
+       "revoked"
+      ],
+      "title": "Lifecycle",
+      "type": "string"
+     },
+     "promoted_from": {
+      "anyOf": [
+       {
+        "items": {
+         "format": "uuid",
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Promoted From"
+     },
+     "purpose": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Purpose"
+     },
+     "recall_count": {
+      "title": "Recall Count",
+      "type": "integer"
+     },
+     "rendered": {
+      "title": "Rendered",
+      "type": "string"
+     },
+     "revalidations": {
+      "items": {
+       "$ref": "#/$defs/RevalidationRecord"
+      },
+      "title": "Revalidations",
+      "type": "array"
+     },
+     "superseded_by": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Superseded By"
+     },
+     "supersedes": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Supersedes"
+     },
+     "tip": {
+      "anyOf": [
+       {
+        "format": "uuid",
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Tip"
+     },
+     "validity": {
+      "enum": [
+       "valid",
+       "invalid"
+      ],
+      "title": "Validity",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "content",
+     "lifecycle",
+     "validity",
+     "supersedes",
+     "superseded_by",
+     "tip",
+     "promoted_from",
+     "invalidated_by",
+     "invalidation_reason",
+     "revalidations",
+     "recall_count",
+     "last_referenced_at",
+     "created_at",
+     "rendered"
+    ],
+    "title": "DecisionView",
+    "type": "object"
+   },
+   "title": null
+  },
+  {
+   "_meta": null,
+   "annotations": {
+    "destructiveHint": null,
+    "idempotentHint": null,
+    "openWorldHint": null,
+    "readOnlyHint": true,
+    "title": null
+   },
+   "description": "Search in-force Decisions by hybrid retrieval. Returns lean triage links (uri / title / lifecycle / validity / scope). Set ``include_superseded=True`` to widen to superseded and revoked Decisions. Set ``include_invalid=True`` to widen to invalidated Decisions. Follow up with the ``decision`` tool to read the full view.",
+   "execution": null,
+   "icons": null,
+   "inputSchema": {
+    "properties": {
+     "include_invalid": {
+      "default": false,
+      "title": "Include Invalid",
+      "type": "boolean"
+     },
+     "include_superseded": {
+      "default": false,
+      "title": "Include Superseded",
+      "type": "boolean"
+     },
+     "limit": {
+      "default": 10,
+      "title": "Limit",
+      "type": "integer"
+     },
+     "query": {
+      "title": "Query",
+      "type": "string"
+     },
+     "scope": {
+      "title": "Scope",
+      "type": "string"
+     }
+    },
+    "required": [
+     "query",
+     "scope"
+    ],
+    "title": "decisions_queryArguments",
+    "type": "object"
+   },
+   "name": "decisions_query",
+   "outputSchema": {
+    "$defs": {
+     "DecisionLink": {
+      "description": "Lean triage link returned by ``decisions_query`` (SPEC §9.1 / [A11]).\n\nIntentionally excludes live stats (recall_count, last_referenced_at, tip)\nand the render — those live in ``DecisionView`` only.  ``uri`` follows the\n``decision://{id}`` scheme that the resource will serve.\n\n``validity`` mirrors the row and ``DecisionView.validity`` (P9 invalid-\nDecision read contract, decision D5): ``\"valid\"`` unless the caller widened\nwith ``decisions_query(include_invalid=True)``.",
+      "properties": {
+       "id": {
+        "format": "uuid",
+        "title": "Id",
+        "type": "string"
+       },
+       "lifecycle": {
+        "enum": [
+         "in_force",
+         "superseded",
+         "revoked"
+        ],
+        "title": "Lifecycle",
+        "type": "string"
+       },
+       "scope": {
+        "title": "Scope",
+        "type": "string"
+       },
+       "superseded_by": {
+        "anyOf": [
+         {
+          "format": "uuid",
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Superseded By"
+       },
+       "title": {
+        "title": "Title",
+        "type": "string"
+       },
+       "uri": {
+        "title": "Uri",
+        "type": "string"
+       },
+       "validity": {
+        "enum": [
+         "valid",
+         "invalid"
+        ],
+        "title": "Validity",
+        "type": "string"
+       }
+      },
+      "required": [
+       "uri",
+       "id",
+       "title",
+       "lifecycle",
+       "validity",
+       "scope"
+      ],
+      "title": "DecisionLink",
+      "type": "object"
+     }
+    },
+    "properties": {
+     "result": {
+      "items": {
+       "$ref": "#/$defs/DecisionLink"
+      },
+      "title": "Result",
+      "type": "array"
+     }
+    },
+    "required": [
+     "result"
+    ],
+    "title": "decisions_queryOutput",
+    "type": "object"
+   },
+   "title": null
+  },
+  {
+   "_meta": null,
+   "annotations": {
+    "destructiveHint": null,
+    "idempotentHint": null,
+    "openWorldHint": null,
+    "readOnlyHint": true,
+    "title": null
+   },
+   "description": "Retrieve relevant memories by hybrid search (vector + BM25). Returns hits ranked by relevance and importance. Set ``include_invalid=True`` to include invalidated records; ``include_archived=True`` to include archived (historical) records.",
+   "execution": null,
+   "icons": null,
+   "inputSchema": {
+    "properties": {
+     "include_archived": {
+      "default": false,
+      "title": "Include Archived",
+      "type": "boolean"
+     },
+     "include_invalid": {
+      "default": false,
+      "title": "Include Invalid",
+      "type": "boolean"
+     },
+     "limit": {
+      "default": 10,
+      "title": "Limit",
+      "type": "integer"
+     },
+     "query": {
+      "title": "Query",
+      "type": "string"
+     },
+     "scope": {
+      "title": "Scope",
+      "type": "string"
+     }
+    },
+    "required": [
+     "query",
+     "scope"
+    ],
+    "title": "recallArguments",
+    "type": "object"
+   },
+   "name": "recall",
+   "outputSchema": {
+    "$defs": {
+     "RecalledHit": {
+      "description": "A single hit from ``recall`` (SPEC §9.1).\n\n``scope`` carries the origin label per SPEC §2 / §0015 — a hit from\n``global`` in a scoped recall is labeled ``\"global\"``.\n\n``purpose`` is present but may be ``None`` when the record was saved\nwithout a purpose value.\n\n``superseded_by`` (2026-08-10 fact-supersession brief): the forward\npointer, when the hit is a superseded Fact.\nNon-``None`` only ever on an ``invalid`` record (``domain.Fact``'s own\nconsistency validator), so it is visible only under\n``include_invalid=True`` — not by any special-casing here, but as a\ndirect consequence of the default recall filter already excluding\ninvalid records. A caller who explicitly asks for invalid records is\nexactly the caller who needs to know where the replacement is.",
+      "properties": {
+       "content": {
+        "title": "Content",
+        "type": "string"
+       },
+       "id": {
+        "format": "uuid",
+        "title": "Id",
+        "type": "string"
+       },
+       "kind": {
+        "enum": [
+         "fact",
+         "decision"
+        ],
+        "title": "Kind",
+        "type": "string"
+       },
+       "lifecycle": {
+        "title": "Lifecycle",
+        "type": "string"
+       },
+       "purpose": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Purpose"
+       },
+       "scope": {
+        "title": "Scope",
+        "type": "string"
+       },
+       "score": {
+        "description": "Post-boost composite score",
+        "minimum": 0.0,
+        "title": "Score",
+        "type": "number"
+       },
+       "superseded_by": {
+        "anyOf": [
+         {
+          "format": "uuid",
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "default": null,
+        "title": "Superseded By"
+       },
+       "validity": {
+        "enum": [
+         "valid",
+         "invalid"
+        ],
+        "title": "Validity",
+        "type": "string"
+       }
+      },
+      "required": [
+       "id",
+       "kind",
+       "content",
+       "lifecycle",
+       "validity",
+       "score",
+       "scope"
+      ],
+      "title": "RecalledHit",
+      "type": "object"
+     }
+    },
+    "description": "Result of a ``recall`` call (SPEC §9.1).\n\n``degraded``: True when the embedder was unavailable and only the BM25 leg\nran.  The caller should treat results as lower-confidence.\n\n``reason``: non-None when ``degraded=True``; describes the outage.\n\n``legs_used``: which search legs contributed.  Normal = ``[\"vector\", \"text\"]``;\ndegraded = ``[\"text\"]``.  Empty when the store has no matches.",
+    "properties": {
+     "degraded": {
+      "default": false,
+      "title": "Degraded",
+      "type": "boolean"
+     },
+     "hits": {
+      "items": {
+       "$ref": "#/$defs/RecalledHit"
+      },
+      "title": "Hits",
+      "type": "array"
+     },
+     "legs_used": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Legs Used",
+      "type": "array"
+     },
+     "reason": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Reason"
+     }
+    },
+    "required": [
+     "hits"
+    ],
+    "title": "RecallResult",
+    "type": "object"
+   },
+   "title": null
+  }
+ ]
+}

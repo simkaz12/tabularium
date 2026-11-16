@@ -1,0 +1,26 @@
+id: p8-auto-follow-up-no-pair
+class: admission-auto-write
+origin: authored
+existing:
+  - alias: e1
+    text: "Automatic follow up writes the new row and registers no distinct pair at all."
+    kind: fact
+    scope: p
+    lifecycle: active
+    validity: valid
+    created_at: 2025-01-01T00:00:00Z
+incoming:
+  content: "Automatic follow up writes the new row and registers no distinct pair whatsoever."
+  scope: p
+  kind: fact
+expect:
+  material: addition
+  step: auto_write
+  mutation:
+    acceptable:
+      - "rows == 2"
+      - "pair(e1, incoming) not registered"
+why: >-
+  Automatic follow_up writes the new row and registers no pair (P8
+  assessor-automatic-exits piece, D5) — both rows exist and stay
+  unlinked.

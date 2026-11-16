@@ -1,0 +1,160 @@
+===== ASSESSOR_VERDICTS_SCHEMA =====
+id: string not null
+created_at: timestamp[us, tz=UTC] not null
+caller: string not null
+method: string not null
+bounce_id: string
+candidate_id: string
+probe_rank: int64
+similarity: double
+pick: string
+odds_json: string
+confidence: double
+reason_class: string
+unavailable_reason: string
+unavailable_detail: string
+model: string
+wording_hash: string
+latency_ms: int64
+input_tokens: int64
+output_tokens: int64
+request_id: string
+status: string not null
+action: string
+actor: string
+matched: bool
+effect_ref: string
+new_record_id: string
+incoming_text: string
+override: string
+override_at: timestamp[us, tz=UTC]
+stamped_at: timestamp[us, tz=UTC]
+===== CLEANER_STATE_SCHEMA =====
+scope: string not null
+watermark_at: timestamp[us, tz=UTC] not null
+last_pass_at: timestamp[us, tz=UTC] not null
+report: string
+===== EVENTS_SCHEMA =====
+target_id: string not null
+at: timestamp[us, tz=UTC] not null
+source: string not null
+matched_from_id: string
+value: double
+reason: string
+similarity: double
+===== MANUAL_CONTESTS_SCHEMA =====
+target_id: string not null
+scope: string not null
+contested_at: timestamp[us, tz=UTC] not null
+reason: string not null
+===== PAIRS_SCHEMA =====
+lower_id: string not null
+higher_id: string not null
+source: string not null
+judged_at: timestamp[us, tz=UTC] not null
+similarity: double
+===== PASS_HISTORY_SCHEMA =====
+scope: string not null
+pass_at: timestamp[us, tz=UTC] not null
+outcome: string not null
+dry_run: bool not null
+payload: string not null
+===== READ_EVENTS_SCHEMA =====
+target_id: string not null
+at: timestamp[us, tz=UTC] not null
+source: string not null
+===== RECORD_JUDGMENTS_SCHEMA =====
+target_id: string not null
+scope: string not null
+judged_at: timestamp[us, tz=UTC] not null
+rubric_version: string not null
+judge_a_identity: string not null
+judge_a_grade: string not null
+judge_a_why: string not null
+judge_b_identity: string not null
+judge_b_grade: string not null
+judge_b_why: string not null
+paired_with: string
+similarity: double
+===== REGISTRY_SCHEMA =====
+name: string not null
+===== REVALIDATIONS_SCHEMA =====
+id: string not null
+decision_id: string not null
+withdrawn_cause: string not null
+withdrawn_reason: string not null
+reason: string not null
+at: timestamp[us, tz=UTC] not null
+===== REVIEWS_SCHEMA =====
+target_id: string not null
+scope: string not null
+reviewed_at: timestamp[us, tz=UTC] not null
+next_review_due_at: timestamp[us, tz=UTC] not null
+outcome: string not null
+band: string
+grades: string
+rubric_version: string not null
+===== SESSIONS_SCHEMA =====
+id: string not null
+scope: string not null
+started_at: timestamp[us, tz=UTC] not null
+ended_at: timestamp[us, tz=UTC] not null
+content: string not null
+source: string
+===== TOMBSTONES_SCHEMA =====
+tombstone_id: string not null
+buried_id: string not null
+type: string not null
+reason: string not null
+timestamp: timestamp[us, tz=UTC] not null
+model_generated: bool not null
+restores: string
+restores_content_hash: string
+===== UNSUPERSEDES_SCHEMA =====
+id: string not null
+edge_id: string not null
+predecessor_id: string not null
+successor_id: string not null
+arm: string not null
+at: timestamp[us, tz=UTC] not null
+withdrawn_reason: string
+withdrawn_note: string
+reason: string
+refused_at: timestamp[us, tz=UTC]
+===== make_records_schema(8) =====
+id: string not null
+type: string not null
+content: string not null
+scope: string not null
+purpose: string
+audience_hint: string
+source: string
+validity: string not null
+reconciles: string
+recall_count: int64 not null
+last_referenced_at: timestamp[us, tz=UTC]
+created_at: timestamp[us, tz=UTC] not null
+updated_at: timestamp[us, tz=UTC] not null
+lifecycle: string not null
+valence: string
+feedback_score: double not null
+hot_rejection_count: int64 not null
+decay_due_at: timestamp[us, tz=UTC]
+owner_recurrence_count: int64 not null
+agent_recurrence_count: int64 not null
+escalation_baseline: int64 not null
+provisional: bool not null
+superseded_by: string
+supersession_chain: string
+promoted_from: string
+embedding_model: string
+vector: fixed_size_list<item: float>[8]
+  child 0, item: float
+content_key: string
+content_hash: string
+previous_content: string
+supersession_reason: string
+supersession_note: string
+supersession_edge_id: string
+invalidated_by: string
+invalidation_reason: string

@@ -1,0 +1,24 @@
+id: falsity-reason-split-assessor-down
+class: admission-falsity
+origin: authored
+existing:
+  - alias: e1
+    text: "The shared team calendar's default reminder lead time is 15 minutes before an event."
+    kind: fact
+    scope: falsity-admission
+    lifecycle: active
+    validity: valid
+    created_at: 2024-01-01T00:00:00Z
+incoming:
+  content: "The shared team calendar's default reminder lead time is now 5 minutes before an event, after the calendar vendor's own default changed underneath everyone."
+  scope: falsity-admission
+  kind: fact
+falsity:
+  judge_a: {verdict: replace, reason: correction, why: "15 minutes was never the real default"}
+  judge_b: {verdict: replace, reason: changed, why: "the vendor's own default moved"}
+  assessor: unavailable
+  expect: contested
+why: >-
+  Same reason-disagreement shape as the "changed" case, but the Assessor
+  times out -- D4's degrade sends it to the panel's own contested queue
+  instead of guessing a reason; `unavailable` never holds the watermark.

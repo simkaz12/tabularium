@@ -1,0 +1,415 @@
+# Tabularium Cleaner rubric — versioned, engine-loaded data.
+#
+# This is the artifact `tabularium.engine.rubric.load_rubric()` parses. It is the Cleaner's single largest tunable: the grading standard that decides what the
+# memory keeps. It is data on purpose — not a Python string literal, not prompt text folded into a
+# judge call site — so a later eval harness can sweep it, and so its version is stamped on every
+# verdict alongside the judge pair.
+#
+# Nothing computes a version field in here: `load_rubric()` derives it by hashing this file's own
+# bytes, so editing this artifact and forgetting to bump a version string is not a failure mode that
+# exists — there is no such field to forget.
+#
+# Relevance-rubric structure, worked keep/shelve examples and framing come from an earlier shelving
+# brief. Its distribution anchor, measured on one project's seed corpus, is deliberately not carried
+# over; see relevance.anchor below.
+
+[meta]
+schema = 1
+drafted = "2026-08-10"
+source = "earlier shelving brief (structure, keep test, worked examples; not its anchor)"
+
+# ---------------------------------------------------------------------------
+# Sweep parameters — data beside the prose, never constants in code.
+# ---------------------------------------------------------------------------
+
+[parameters]
+# Candidates retrieved per newcomer in the falsity pair sweep.
+k = 5
+# Minimum probe similarity for a falsity-sweep candidate pair. A pair below this
+# floor is not a candidate at all; it never reaches a judge.
+similarity_floor = 0.80
+# Maximum records per judge batch, either axis — the panel shape both axes share
+# (the panel shape carried over from the earlier shelving pass).
+batch_cap = 56
+# Fraction of a relevance batch a judge may grade `unclear` before the batch reads as a reading
+# failure rather than a genuine mix of unjudgeable records (past ~10% unclear means
+# you are not reading).
+unclear_ceiling = 0.10
+# Ceiling on one Cleaner pass's `list_born_since` call. The outer pass-orchestration snapshot and each axis's own internal re-query all read THIS one
+# value, so the watermark-advance snapshot and what the axes actually judged cannot silently
+# diverge the way three separately-declared `_DEFAULT_POOL_LIMIT` Python constants could. Real
+# batch size is still emergent (the write rate since the last pass) -- this is a safety ceiling on
+# a mandatory storage-protocol argument, never a number anyone tunes for judging quality.
+pool_limit = 100000
+# Ceiling on the number of owner-attention lines context() renders for one Cleaner pass.
+# The full report (every id, uncapped) still lands in the `report` column -- this only bounds the
+# short session-start rendering, which competes with grounding for the budget.
+report_render_cap = 5
+
+# Revisit axis. A per-pass record cap that doubles as the cold-start ramp: with a few thousand
+# eligible Facts, a 90-day interval puts steady state at a few dozen records/day, so this cap only binds during the initial drain, spread over
+# successive digests.
+revisit_batch_cap = 12
+# Ceiling on one revisit-axis pass's `list_due_for_review` call -- the cold-start ramp.
+# Deliberately larger than `revisit_batch_cap`: the pool is filtered further by
+# `_select_revisit_pool` (protected / no-evidence exclusions) before batching, so the raw pool
+# must be wider than one batch to keep the drain moving even on a pass with many exclusions.
+revisit_pass_cap = 48
+# A record must be at least this many days old before it is eligible for its first revisit look --
+# the revisit interval is itself the throttle (decision 2), and a record younger than this has not
+# had time to accumulate any evidence beyond its own birth digest.
+revisit_min_age_days = 30
+# Base interval between revisit-axis looks at a record, in days (decision 4).
+revisit_interval_days = 90
+# Multiplier applied to the interval per consecutive unanimous-keep review (decision 13) -- a
+# record repeatedly confirmed stable earns a longer gap before it is looked at again.
+revisit_stable_multiplier = 2.0
+# Multiplier applied to the interval when the last review was contested (decision 13) -- a record
+# the panel disagreed on earns a SHORTER gap, not a longer one.
+revisit_contested_multiplier = 0.5
+# Ceiling on the compounded interval, in days -- stability earns a longer gap, never an unbounded
+# one.
+revisit_max_interval_days = 360
+
+# ---------------------------------------------------------------------------
+# Relevance rubric — does this record still deserve to be in the store.
+# ---------------------------------------------------------------------------
+
+[relevance]
+scale = ["shelve-clear", "shelve-lean", "keep-lean", "keep-clear"]
+
+anchor = '''
+Anchor (provisional, unmeasured): in a tail pass over records already written under the current
+admission gate, most records should be kept and a shelve verdict should be the exception rather than
+the routine outcome an older seed-corpus pass expected — this shape must be replaced by measured data
+from the first several real passes, not treated as a quota.
+'''
+
+prose = '''
+# Cleaner — relevance rubric
+
+You are one judge on a panel of two independent judges grading a batch of records from a real,
+long-term memory store. For each record, decide whether it should be SHELVED or KEPT.
+
+The other judge is a different model. You will not see their answers and they will not see yours.
+Where you agree, the verdict applies automatically; where you disagree, that disagreement is itself
+the signal this pass exists to surface. So do not hedge toward the middle to look safe — judge the
+record.
+
+## What shelving is, and why it is not burial
+
+`shelved` is a lifecycle state, not deletion. A shelved record:
+
+- is still returned by recall — it keeps its content and stays searchable;
+- stops being a dedup-gate candidate — this is the entire point;
+- never appears in session-start grounding;
+- is reversible with a single call.
+
+That reversibility is why this pass can run unattended. A wrong shelve costs one undo; a missed shelve
+costs permanent noise in grounding and in the dedup candidate pool, forever.
+
+## The admission gate — the standard this pass applies retroactively
+
+This rubric does not invent a new standard. It applies the store's own admission gate to records that
+already exist. Ask, of every record:
+
+1. Derivable? Could a reader who does not yet know this land on it by reading the code, the docs, or
+   the commit history — cheaply, in the course of ordinary reading, not by running a special
+   investigation?
+2. Perishable? Is it false now, or merely irrelevant now?
+3. Is it a sequencing atom — "task N shipped", "PR merged", "suite green", "deployed"? Timeline events,
+   all recoverable from git.
+4. Is it session narrative — the story of what a session did, rather than a fact it produced? Its home
+   is a digest row, not a standing atom.
+
+Question 1 is not "is this fact present in the codebase somewhere" — everything about the code is
+present in the code, including every bug in it, so that reading would make every code-defect finding
+derivable and gut this gate. It is whether reading gets a reader there cheaply. A record describing
+what the code currently DOES — a setting, a rule, the present shape of a policy — is derivable: reading
+the code answers the same question directly, more reliably and more currently than the record does. A
+record describing what the code FAILS to do, or a gap between what it appears to do and what it
+actually does — an absence, a defect, a trap, a misleading surface — is not derivable in this sense,
+however present the bytes are: you cannot find an absence by reading the thing, only by already knowing
+to look for it, and a misleading surface actively points a reader away from the real cause. Investigation
+cost is the test, not existence in principle.
+
+Any yes is the shelve case. A KEEP is a standing statement: true on its own, independent of when it was
+learned or what order things happened in — a convention, a gotcha, a correction, a preference, an
+infrastructure detail, or a real rationale for why something was done a particular way.
+
+## Question 1, worked
+
+Naming the category once is not enough to stop it being applied too literally: a judge may answer
+"yes, derivable" on every record that mentions code and shelve it wrongly. Two named instances, so the
+category has a face:
+
+> KEEP — "bookstore-api `OrderController.php`: the three `$this->authorize(...)` calls guarding the
+> order endpoints are commented out, so no authorization check runs on any order endpoint."
+>
+> An absence. The comment IS there to be read, but nothing about ordinary reading routes anyone to
+> this exact file to check whether the call still executes: not the request flow (a commented-out
+> call raises nothing), not the route list, not a green test suite. You find this only by already
+> suspecting authorization is missing and going to check this file line by line. Q1: no — present in
+> the bytes, not on any path an ordinary reader would take.
+
+> KEEP — "`PATCH /todos/{id}` intermittently 500s with a CORS-looking error while the write actually
+> completes. The cause is an unpruned `request_log` table with millions of rows, which pushes the
+> request past the server's execution limit."
+>
+> A misleading surface. The visible symptom points a reader at the wrong layer (CORS, the network)
+> while the real cause is an unrelated table's row count. The endpoint's own code reads correctly;
+> nothing in it says this. Tracing found it, not a code read. Q1: no.
+
+## The keep test
+
+Delete the "where I learned this" clause: the ticket id, the commit, the session date. Is there still
+a fact?
+
+> KEEP — "Lane-classification lesson (TICKET-A): a console repro proving 'a' backend bug exists does
+> not prove it is 'the' bug. Before labelling a ticket as a backend problem off such a repro, confirm
+> the frontend actually triggers that backend code path…"
+>
+> Strip `TICKET-A` and a durable, transferable working lesson remains. It will still be true next year.
+
+> SHELVE — "TICKET-B fix: OrderPolicy now gates viewAny on any of
+> orders:read/orders:read-team/…"
+>
+> Strip `TICKET-B` and it says "a policy was changed to its current state". That is exactly what
+> reading `OrderPolicy` tells you, more reliably and more currently. Derivable (q1), and a
+> change record (q3).
+
+The difference is never the presence of an identifier. It is whether the record carries knowledge or
+reports an event.
+
+## Prefix tags — a prior, not a rule
+
+Some records open with a colon-terminated tag written by an earlier curation habit: `PREFERRED:`,
+`CORRECTED:`, `REINFORCED:`, `GOTCHA:`. These lean KEEP — they were written to mark something durable,
+and `CORRECTED:` in particular usually carries a repair to a previously-wrong belief, which is exactly
+the knowledge that is expensive to rediscover. Treat the tag as evidence, then read the record anyway.
+A tag on an otherwise empty event record does not save it, and its absence condemns nothing — most
+records in a real store carry no tag at all.
+
+## The scale — ordered, four points, no middle
+
+Every record gets exactly one grade, chosen from the four-point scale below, worst to best. There is
+deliberately no neutral option.
+
+If a record genuinely cannot be judged from its content alone — it references something outside the
+batch and could reasonably be either — grade it `keep-lean` and mark it `unclear`. That routes it to
+the owner as an explicit unknown rather than hiding behind a grade. `unclear` is capped (see the
+`unclear_ceiling` parameter) and is not an escape hatch: use it only when the record truly cannot be
+judged, not when judging it is merely uncomfortable.
+
+Notice the two shapes that mean you have drifted:
+
+- grading nearly everything `keep-*` — that is abstaining, not judging;
+- grading on surface features (mentions an identifier → shelve; has a tag → keep) rather than on
+  whether knowledge survives stripping the provenance clause.
+
+## Keeping the surviving part
+
+When you grade a record `shelve-*` but one part of it would pass the gate on its own — a gotcha, a
+rule, a preference that is durable and that the rest of the record does not depend on — restate
+only that part in `keep`, as a standalone record a reader can use without the original. Leave out
+everything that made you shelve it. Omit `keep` when nothing of the record survives on its own,
+and never put it on a `keep-*` grade.
+
+## `why` is mandatory
+
+Every verdict carries a one-sentence `why` naming the gate question, or the keep test, that decided
+it. "Junk" or "not useful" is not a why.
+'''
+
+# ---------------------------------------------------------------------------
+# Revisit rubric — a second pass over old records, with evidence in hand. Rendered AFTER
+# [relevance].prose so the shared grading standard
+# (what shelving is, the admission gate, the keep test, the four-point scale, `why`) stays in ONE
+# place; this section adds only what is DIFFERENT about a revisit batch — the history block each
+# record now carries, and the two rules that keep it from being misread.
+# ---------------------------------------------------------------------------
+
+[revisit]
+prose = '''
+# Cleaner — revisit rubric (read after the relevance rubric above)
+
+You are grading this batch under the SAME admission gate, the SAME keep test, and the SAME
+four-point scale already described above — shelve or keep, `why` mandatory, `unclear` capped and
+not an escape hatch. Everything above still applies. This section adds one thing: each record in
+this batch was NOT written this session. It carries a compact HISTORY BLOCK — the session digest
+from when it was born, and any later session digests that returned to its subject — appended below
+the record's own content.
+
+## How to read the history block
+
+The history block is INPUT TO WEIGH, not part of the record's text and not itself a candidate for
+grading. It is evidence about whether the record still holds up, offered so you are not judging
+blind the way the birth-window pass necessarily does. Read it, then judge the record against the
+SAME gate and the SAME keep test used above — the history block informs the verdict, it does not
+replace the standard the verdict is measured against.
+
+## Silence proves nothing
+
+Absence of recurrence is not a shelve signal. A record with no later session mentioning it, and no
+lifecycle event since it was written, is not in this batch at all — that case is filtered out
+before any judge ever sees it. But a record that DOES reach you may still show only sparse, thin
+evidence beyond its birth, and that thinness is not itself grounds to shelve. A gotcha hit once and
+not mentioned again for a year has zero recurrence in the history block and is exactly what the
+store is for — durable knowledge is not supposed to come up in conversation constantly to justify
+its own continued existence. Judge the record on whether it would still mislead or waste a reader's
+time if it were wrong or gone, not on how often it has been discussed since.
+
+## The birth digest is the author's own account
+
+The history block's birth-session excerpt is labelled as the author's own account, written at the
+time the record was saved — not a third-party observation. It is admissible two ways: as the
+BASELINE of a comparison (what did the author think was true then, and does later evidence still
+agree), and as evidence of what a reader would otherwise get wrong (the birth digest often names the
+misconception the record corrects, which is direct signal about the cost of NOT knowing it). It is
+NOT admissible as an argument that the record matters because its author said so at the time — an
+author's own enthusiasm for what they just wrote is not evidence a future reader needs it, and
+weighing it that way would bias every verdict in this batch toward keep for no reason but its own
+presence.
+
+## The test is correctness, not cost
+
+A record earns its place in the store when a future reader would otherwise confidently do the wrong
+thing without it — not merely because re-deriving it would take longer without it. "This would save
+someone time" is not, by itself, the keep test; "this would let someone stay wrong" is. Apply this
+alongside the admission gate above, on every record in this batch, exactly as rigorously as the
+birth-window pass is supposed to but cannot, since it has no evidence yet to weigh.
+'''
+
+# ---------------------------------------------------------------------------
+# Falsity rubric — given a newer record and an older one, replace or coexist.
+# ---------------------------------------------------------------------------
+
+[falsity]
+verdicts = ["coexist", "replace"]
+
+anchor = '''
+Anchor (provisional, unmeasured): the similarity floor and k are tuned to surface only close
+candidates, so most pairs that reach a judge should turn out to be genuine replacements — a `coexist`
+majority is a sign the floor needs tightening, not evidence that this scope's pairs are usually
+unrelated, and this reading too must be replaced by measured data from the first several real passes.
+'''
+
+prose = '''
+# Cleaner — falsity rubric
+
+You are one judge on a panel of two, adjudicating pairs: a newer record N and an older record O that
+the pair sweep has already established as a similarity-flagged candidate, with O strictly older than
+N. Direction is never yours to set — it is structural, decided before the pair reaches you.
+
+## The question
+
+Does N REPLACE O, or do N and O COEXIST?
+
+This is judged as replacement, not as logical incompatibility. Two records can be perfectly consistent
+with each other and still have one replace the other — a later measurement replacing an earlier
+placeholder, a corrected belief replacing the mistaken one it corrects, a current state replacing a
+prior one the record describes. The test is not "do these contradict", it is "does O still belong in
+the working set once N exists, or has N already said everything O said, more currently."
+
+REPLACE when reading O after N would mislead, would waste a reader's time re-deriving what N already
+states more currently, or would leave two versions of the same claim for a future reader to reconcile
+by hand.
+
+COEXIST when N and O are about related but distinct subjects, when O's own claim still stands next
+to N, or when N narrows a scope O still covers more broadly elsewhere. If N replaces O's claim but a
+separate point in O is still true and N does not say it, that is REPLACE with `carry`, not COEXIST.
+
+## No escape hatch here either
+
+Every pair gets exactly one of the two verdicts above. There is no `unclear` on this axis: if a pair
+reaches you, the sweep has already established it is old enough and similar enough to be worth a
+judgement, and abstaining defeats the purpose of running the sweep at all.
+
+## `why` is mandatory
+
+Every verdict carries a one-sentence `why` naming what changed between O and N, or what keeps them
+both standing.
+
+## When you answer REPLACE, also name why
+
+When you answer REPLACE, also give `reason`: `correction` if the older record was wrong when it was
+written, `changed` if it was true then and what it describes has since moved on. If the newer record
+only adds detail or precision and the older one still holds, the answer is COEXIST, not REPLACE.
+
+If O holds a separate point that is still true and that N does not say, put it in `carry` as one or
+two sentences that read naturally appended to N — it will be added to N. Omit `carry` when N says
+everything of O that still holds.
+'''
+
+# ---------------------------------------------------------------------------
+# Judge panel -- which judge fills which seat, and what backs it up. Ordering is data here, never
+# a branch in engine/judge.py: swapping a CLI, pinning a different model, or changing the backstop
+# is a one-line artifact edit.
+# ---------------------------------------------------------------------------
+
+# Seat A: claude -p (Opus), one of the two subscription CLIs, costing no API spend. Judging is what
+# this pass is for and shelving is the destructive edge, so the stronger model is worth the quota.
+# The two seats must differ in model family; Opus and GPT satisfy that.
+[judges.seat_a]
+adapter = "cli"
+cli = "claude"
+model = "opus"
+binary = "claude"
+
+# Seat B: codex exec, the second subscription CLI. The model is pinned explicitly so a moving CLI
+# default cannot change the judge silently. The pin must be a model the account can serve; an
+# unsupported pin makes every call fail with a 400.
+[judges.seat_b]
+adapter = "cli"
+cli = "codex"
+model = "gpt-5.6-sol"
+binary = "codex"
+
+# The key-based backstop behind whichever primary seat is unavailable, never a per-seat fallback.
+# Subscription OAuth can lapse unattended while credential files still sit on disk, so the backstop
+# is a route that cannot expire. litellm ships native DeepSeek support and reads DEEPSEEK_API_KEY;
+# no custom transport is needed.
+[judges.backstop]
+adapter = "litellm"
+model = "deepseek/deepseek-chat"
+
+# ---------------------------------------------------------------------------
+# Case-set rubric -- the `ideal`-tier judge for admission cases. A seat in the SAME JudgeSeatConfig
+# shape as the Cleaner panel above, copied from [judges.seat_a] (claude -p, Opus,
+# no MCP grant). Nothing calls it yet.
+# ---------------------------------------------------------------------------
+
+[caseset]
+prompt_template = '''
+# Admission case-set -- ideal-tier judge
+
+You are grading one admission case for a long-term memory store. You will see the EXISTING
+records already in the store, then the INCOMING record a caller is about to save. You do not see
+why the case exists, and your answer must not assume anything beyond the two blocks below.
+
+## Existing records
+
+{existing}
+
+## Incoming record
+
+{incoming}
+
+## Your answer
+
+Decide the material relationship between the incoming record and the existing ones, and the
+checks a correct write against the store would satisfy. Reply with a single JSON object, no prose
+outside it:
+
+{"material": "<one of: repetition, elaboration, addition, correction, changed state, unrelated>",
+  "checks": ["<zero or more of: rows == N, <alias>.validity == valid|invalid,
+  <alias>.superseded_by == <alias>, <alias>.text unchanged,
+  history says corrected|changed|elaborated|moved, pair(<alias>,<alias>) registered>"]}
+'''
+
+[caseset.judge]
+adapter = "cli"
+cli = "claude"
+model = "opus"
+binary = "claude"
+

@@ -1,0 +1,42 @@
+id: p8-composed-fault
+class: admission-composition-fault
+origin: authored
+existing:
+  - alias: e1
+    text: "The probe span union covers every scope whose read span contains the target scope."
+    kind: fact
+    scope: p
+    lifecycle: active
+    validity: valid
+    created_at: 2025-01-01T00:00:00Z
+  - alias: e2
+    text: "A composed replace call either commits every flip and invalidation together or none of them land."
+    kind: fact
+    scope: p
+    lifecycle: active
+    validity: valid
+    created_at: 2025-01-01T00:00:00Z
+incoming:
+  content: "A composed replace call either commits every flip and invalidation together or none of them lands."
+  scope: p
+  kind: fact
+  supersedes: [e1]
+  reason: changed
+expect:
+  material: correction
+  mutation:
+    acceptable:
+      - "rows == 2"
+      - "e1.text unchanged"
+      - "e2.text unchanged"
+      - "e1.validity == valid"
+      - "e2.validity == valid"
+fault:
+  "on": replace
+  call: 1
+why: >-
+  A fault on the single composed replace call leaves both the caller's own
+  predecessor and the Assessor-found candidate untouched and lands no
+  successor (P8 assessor-automatic-exits piece, D3/D13's both-or-neither
+  guarantee) — the SAME transaction proof P3's own composed-fault case
+  gives a single predecessor, extended to two.

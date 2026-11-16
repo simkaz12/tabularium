@@ -1,0 +1,5 @@
+$233055c6-c4af-441a-9608-764f8bf123c8²×id ÿÿÿÿÿÿÿÿÿ*string8type ÿÿÿÿÿÿÿÿÿ*string8 content ÿÿÿÿÿÿÿÿÿ*string8scope ÿÿÿÿÿÿÿÿÿ*string8"purpose ÿÿÿÿÿÿÿÿÿ*string08(audience_hint ÿÿÿÿÿÿÿÿÿ*string08!source ÿÿÿÿÿÿÿÿÿ*string08!validity ÿÿÿÿÿÿÿÿÿ*string8%
+reconciles ÿÿÿÿÿÿÿÿÿ*string08$recall_count	 ÿÿÿÿÿÿÿÿÿ*int6487last_referenced_at
+ ÿÿÿÿÿÿÿÿÿ*timestamp:us:UTC08-
+created_at ÿÿÿÿÿÿÿÿÿ*timestamp:us:UTC8-
+updated_at ÿÿÿÿÿÿÿÿÿ*timestamp:us:UTC8"	lifecycle ÿÿÿÿÿÿÿÿÿ*string8"valence ÿÿÿÿÿÿÿÿÿ*string08'feedback_score ÿÿÿÿÿÿÿÿÿ*double8+hot_rejection_count ÿÿÿÿÿÿÿÿÿ*int6481decay_due_at ÿÿÿÿÿÿÿÿÿ*timestamp:us:UTC08.owner_recurrence_count ÿÿÿÿÿÿÿÿÿ*int648.agent_recurrence_count ÿÿÿÿÿÿÿÿÿ*int648+escalation_baseline ÿÿÿÿÿÿÿÿÿ*int648"provisional ÿÿÿÿÿÿÿÿÿ*bool8(superseded_by ÿÿÿÿÿÿÿÿÿ*string08-supersession_chain ÿÿÿÿÿÿÿÿÿ*string08(promoted_from ÿÿÿÿÿÿÿÿÿ*string08(embedding_model ÿÿÿÿÿÿÿÿÿ*string82vector ÿÿÿÿÿÿÿÿÿ*fixed_size_list:float:808

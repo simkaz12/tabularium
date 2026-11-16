@@ -1,0 +1,25 @@
+id: falsity-split-assessor-correction
+class: admission-falsity
+origin: authored
+existing:
+  - alias: e1
+    text: "The nightly backup retention window keeps snapshots for 7 days before pruning."
+    kind: fact
+    scope: falsity-admission
+    lifecycle: active
+    validity: valid
+    created_at: 2024-01-01T00:00:00Z
+incoming:
+  content: "The nightly backup retention window has actually always kept snapshots for 30 days; the 7-day figure was read off the wrong dashboard panel."
+  scope: falsity-admission
+  kind: fact
+falsity:
+  judge_a: {verdict: replace, reason: correction, why: "7 days was read off the wrong panel"}
+  judge_b: {verdict: coexist, why: "both figures could describe different tiers"}
+  assessor: correction
+  expect: supersede:correction
+why: >-
+  D9: one judge votes replace, the other coexist -- an action split. A fresh
+  contradiction call, carrying both judges' own votes and reasoning, decides
+  the pair outright; the Assessor picks "correction" so the write lands with
+  that reason, action split_supersede.

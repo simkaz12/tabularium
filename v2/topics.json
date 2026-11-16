@@ -1,0 +1,26 @@
+[
+  {
+    "name": "Memory system design",
+    "description": "Design choices for the memory system itself: save gate, cleaner, lifecycle, recall ranking and grounding."
+  },
+  {
+    "name": "Memory system internals",
+    "description": "Module layout, the storage seam, database behaviour, schema migrations, tests and refactors inside the memory repo."
+  },
+  {
+    "name": "Server and deploy operations",
+    "description": "The host that runs the server: reverse proxy, systemd units, containers, deploys and disk layout."
+  },
+  {
+    "name": "Web app development",
+    "description": "A web application's dev environment, build and test workflow, framework conventions and recurring traps."
+  },
+  {
+    "name": "Agent tooling and workflow",
+    "description": "Coding-agent configuration, skills, hooks, subagent roles and review workflow."
+  },
+  {
+    "name": "Personal preferences",
+    "description": "Working style, commit and writing conventions, and standing rules that apply across projects."
+  }
+]

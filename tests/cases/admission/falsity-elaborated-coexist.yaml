@@ -1,0 +1,23 @@
+id: falsity-elaborated-coexist
+class: admission-falsity
+origin: authored
+existing:
+  - alias: e1
+    text: "The staging environment takes a database snapshot once every 24 hours."
+    kind: fact
+    scope: falsity-admission
+    lifecycle: active
+    validity: valid
+    created_at: 2024-01-01T00:00:00Z
+incoming:
+  content: "The staging environment's once-every-24-hours database snapshot runs at 03:00 UTC, chosen to land after the nightly batch jobs finish."
+  scope: falsity-admission
+  kind: fact
+falsity:
+  judge_a: {verdict: coexist, why: "the newer record only adds the exact time, the cadence still holds"}
+  judge_b: {verdict: coexist, why: "both describe the same still-true cadence"}
+  expect: coexist
+why: >-
+  Unanimous coexist -- the newer record only adds precision, the older one
+  still holds (rubric's own REPLACE-vs-COEXIST line). No Assessor call, no
+  verdict row, byte-identical to pre-A3 behaviour.

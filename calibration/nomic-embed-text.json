@@ -1,0 +1,26 @@
+{
+  "P_floor": 0.95,
+  "current_seeds": {
+    "auto_ceiling": 0.97,
+    "decision_gray_floor": 0.7,
+    "gray_floor": 0.8,
+    "precision": 1.0,
+    "recall": 0.65
+  },
+  "dim": 768,
+  "embedder": "ollama/nomic-embed-text",
+  "generated_at": "2026-07-23T00:41:11.893609+00:00",
+  "generated_by": "scripts/calibrate_thresholds.py",
+  "golden_set_by_class": {
+    "distinct_near": 10,
+    "same": 20,
+    "unrelated": 10
+  },
+  "golden_set_size": 40,
+  "recommendation": {
+    "auto_ceiling": 0.8,
+    "gray_floor": 0.5,
+    "precision": 0.9523809523809523,
+    "recall": 1.0
+  }
+}

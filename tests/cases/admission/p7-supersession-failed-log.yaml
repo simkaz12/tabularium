@@ -1,0 +1,33 @@
+id: p7-supersession-failed-log
+class: admission-supersession-fault
+origin: authored
+existing:
+  - alias: e1
+    text: "The gray floor is the cosine threshold at or above which a probe survivor goes to the Assessor instead of writing straight through."
+    kind: fact
+    scope: tabularium
+    lifecycle: active
+    validity: valid
+    created_at: 2025-01-01T00:00:00Z
+incoming:
+  content: "The gray floor is the cosine threshold at or above which a probe survivor is judged rather than landing unjudged; below it the save writes straight through."
+  scope: tabularium
+  kind: fact
+  supersedes: [e1]
+  reason: correction
+expect:
+  material: correction
+  mutation:
+    acceptable:
+      - "e1.text unchanged"
+      - "rows == 1"
+fault:
+  "on": replace
+  call: 1
+why: >-
+  A correction naming its predecessor in supersedes is excluded from the
+  exact-key and serial-probe steps by that same exclusion (P7
+  admission-order piece, the "excluded_only" step); when the terminal
+  adapter.replace fails, log_failed_supersession fires once and nothing
+  lands — the predecessor's text is untouched and no partial successor
+  row survives.

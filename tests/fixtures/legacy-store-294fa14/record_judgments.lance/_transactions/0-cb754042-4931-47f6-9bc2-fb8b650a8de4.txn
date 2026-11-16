@@ -1,0 +1,3 @@
+$cb754042-4931-47f6-9bc2-fb8b650a8de4²Ú 	target_id ÿÿÿÿÿÿÿÿÿ*string8scope ÿÿÿÿÿÿÿÿÿ*string8,	judged_at ÿÿÿÿÿÿÿÿÿ*timestamp:us:UTC8'rubric_version ÿÿÿÿÿÿÿÿÿ*string8)judge_a_identity ÿÿÿÿÿÿÿÿÿ*string8&judge_a_grade ÿÿÿÿÿÿÿÿÿ*string8$judge_a_why ÿÿÿÿÿÿÿÿÿ*string8)judge_b_identity ÿÿÿÿÿÿÿÿÿ*string8&judge_b_grade ÿÿÿÿÿÿÿÿÿ*string8$judge_b_why	 ÿÿÿÿÿÿÿÿÿ*string8&paired_with
+ ÿÿÿÿÿÿÿÿÿ*string08%
+similarity ÿÿÿÿÿÿÿÿÿ*double08

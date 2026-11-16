@@ -1,0 +1,25 @@
+id: p7-exact-key-whitespace
+class: admission-exact-key
+origin: authored
+existing:
+  - alias: e1
+    text: "Ties in the exact-key step prefer the same-scope row first, then global, then the oldest by created_at and id within that tier."
+    kind: fact
+    scope: p
+    lifecycle: active
+    validity: valid
+    created_at: 2025-01-01T00:00:00Z
+incoming:
+  content: "Ties  in the exact-key step prefer the  same-scope row first, then global,\nthen the oldest by created_at and id within that tier."
+  scope: p
+  kind: fact
+expect:
+  material: repetition
+  mutation:
+    acceptable:
+      - "rows == 1"
+      - "e1.text unchanged"
+why: >-
+  A whitespace-only variant of an existing row shares its canonical content
+  key and reinforces silently without ever calling the embedder (P7
+  admission-order piece, step 3, same-scope direction).

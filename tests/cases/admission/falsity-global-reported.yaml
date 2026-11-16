@@ -1,0 +1,27 @@
+id: falsity-global-reported
+class: admission-falsity
+origin: authored
+existing:
+  - alias: e1
+    text: "The team's shared password manager vault is named ops-vault-legacy."
+    kind: fact
+    scope: global
+    lifecycle: active
+    validity: valid
+    created_at: 2024-01-01T00:00:00Z
+incoming:
+  content: "The team's shared password manager vault was renamed to ops-vault-2024 after the legacy vault was retired."
+  scope: falsity-admission
+  kind: fact
+falsity:
+  judge_a: {verdict: replace, reason: changed, why: "never reached -- the older record sits in global"}
+  judge_b: {verdict: coexist, why: "never reached -- the older record sits in global"}
+  assessor: changed
+  expect: global_reported
+why: >-
+  The older record sits in `global` -- read, detected, never sent to a
+  judge (global candidates are classified out before batching). D7: a
+  `contradiction` call still runs, bounded by the Cleaner's own fan-out
+  cap, logged `action="global_reported"` and annotated on the report
+  entry -- never written, `global` stays owner-curated regardless of the
+  Assessor's own pick.

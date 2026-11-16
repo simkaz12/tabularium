@@ -1,0 +1,26 @@
+id: p8-auto-restatement-reinforce
+class: admission-auto-restatement
+origin: authored
+existing:
+  - alias: e1
+    text: "Restatement reinforcement lets a survivor reassert existing content without writing a new row."
+    kind: fact
+    scope: p
+    lifecycle: active
+    validity: valid
+    created_at: 2025-01-01T00:00:00Z
+incoming:
+  content: "Restatement reinforcement lets a survivor reassert existing content without writing any new row."
+  scope: p
+  kind: fact
+expect:
+  material: repetition
+  step: auto_reinforce
+  mutation:
+    acceptable:
+      - "rows == 1"
+      - "e1.text unchanged"
+why: >-
+  Same-scope restatement with the switch on reinforces automatically (P8
+  assessor-automatic-exits piece, D2): the Assessor's verdict is
+  restatement/None, legal_exit returns Reinforce, and no new row lands.

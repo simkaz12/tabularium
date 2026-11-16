@@ -1,0 +1,25 @@
+id: p7-upward-exact-bounce
+class: admission-exact-key
+origin: authored
+existing:
+  - alias: e1
+    text: "The cross-tier direction rule always bounces when a global save restates a named-scope row."
+    kind: fact
+    scope: p
+    lifecycle: active
+    validity: valid
+    created_at: 2025-01-01T00:00:00Z
+incoming:
+  content: "The cross-tier direction rule always bounces when a global save restates a named-scope row."
+  scope: global
+  kind: fact
+expect:
+  material: repetition
+  mutation:
+    acceptable:
+      - "rows == 1"
+      - "e1.text unchanged"
+why: >-
+  A global save restating a named-scope row is the upward direction (P7
+  admission-order piece): the save always bounces and
+  the named-scope row is left untouched.

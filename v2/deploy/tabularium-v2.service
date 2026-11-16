@@ -1,0 +1,30 @@
+[Unit]
+Description=Tabularium v2 memory server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+WorkingDirectory=@DEPLOY_DIR@
+Environment=NODE_ENV=production
+Environment=TABULARIUM_HOST=127.0.0.1
+Environment=TABULARIUM_PORT=8789
+Environment=TABULARIUM_STORE=/var/lib/tabularium-v2/store
+Environment=TABULARIUM_EMBED_URL=http://localhost:11434/api/embed
+Environment=TABULARIUM_EMBED_MODEL=nomic-embed-text
+Environment=TABULARIUM_ASSESSOR_MODEL=jev-1.13.0
+Environment=TABULARIUM_TOPICS_PATH=@DEPLOY_DIR@/topics.json
+Environment=TABULARIUM_CONTAINMENT=on
+Environment=TABULARIUM_CONTAINMENT_FLOOR=0.95
+Environment=TABULARIUM_FOLD_ASK=on
+Environment=TABULARIUM_FOLD_SIMILARITY_FLOOR=0.8
+Environment=TABULARIUM_FOLD_SUBJECT_FLOOR=0.7
+Environment=TABULARIUM_FOLD_ASK_TIMEOUT_MS=600000
+EnvironmentFile=/etc/tabularium/typesafe.env
+ExecStart=/usr/bin/node src/main.ts
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
