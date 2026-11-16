@@ -25,7 +25,15 @@ The design documents under `docs/` ([`SPEC.md`](docs/SPEC.md) and [`docs/adr/`](
 
 ### Records
 
-A record is a hypomnema, a durable note kept for later recall. There are two kinds. A Fact is mutable knowledge that may be revised and decays out of use. A Decision records what was chosen and why. Its content never changes. A change is a new Decision that supersedes the old one, and the old one stays queryable as history. A scope is a flat namespace per project. Reading in scope X sees X plus a reserved `global` scope.
+A record is a hypomnema, a durable note kept for later recall. A scope is a flat namespace per project. Reading in scope X sees X plus a reserved `global` scope.
+
+There are three kinds of record:
+
+- A Fact is knowledge that may be revised and decays out of use.
+- A Decision records what was chosen and why. In v2 it also names the option that was ruled out. Its content never changes. A change is a new Decision that supersedes the old one, and the old one stays queryable as history.
+- A Defect is a bug an agent saw and left alone. It records where the bug is, what triggers it, the symptom, and why it was left. It moves from `open` to `taken` (an agent is working on it) to `closed`. Closing it takes a proposal whose excerpt is the proof of the fix. A daily sweep sends stale takes back to `open`, and asks a human whether a defect open for 90 days is still real.
+
+The v1 engine has only Facts and Decisions. Defects came with v2.
 
 ### Read side
 
@@ -61,7 +69,7 @@ LanceDB is the production store, behind a storage port. An in-memory adapter imp
 
 ### v2
 
-v2 is a separate TypeScript server with its own LanceDB store. Agents submit proposals (`POST /v2/proposals`), and an agent proposal applies on create. A checker model (the same hosted assessor) labels each proposal and flags the ones that look like junk or restatements. A weekly cleaner queues merge, supersede, retire and promote suggestions as tiles for a human to approve or reject. Records imported from a v1 store sit in a separate legacy table that recall searches alongside the v2 records; legacy rows never change and drop out of recall once a v2 record replaces them. The route list and every status code are in [`v2/README.md`](v2/README.md).
+v2 is a separate TypeScript server with its own LanceDB store. Agents submit proposals (`POST /v2/proposals`) for any of the three kinds, and an agent proposal applies on create. Agents take and release defects directly, with no proposal. A checker model (the same hosted assessor) labels each proposal and flags the ones that look like junk or restatements. A weekly cleaner queues merge, supersede, retire and promote suggestions as tiles for a human to approve or reject. Records imported from a v1 store sit in a separate legacy table that recall searches alongside the v2 records; legacy rows never change and drop out of recall once a v2 record replaces them. The route list and every status code are in [`v2/README.md`](v2/README.md).
 
 ## Quick start
 
