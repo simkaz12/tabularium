@@ -3,12 +3,13 @@ import { fileURLToPath } from "node:url";
 
 import { TypeSafeClient } from "@typesafe-ai/sdk";
 
-import { Cleaner, scheduleAt, scheduleWeekly } from "./cleaner.ts";
+import { CLEANER_SLOT, Cleaner, scheduleAt } from "./cleaner.ts";
 import { loadConfig } from "./config.ts";
 import type { Config } from "./config.ts";
 import { sweepDefects } from "./defectSweep.ts";
 import type { JevClient } from "./domain.ts";
 import { OllamaEmbedder } from "./embed.ts";
+import { checkEmbedderBuild } from "./embedderBuild.ts";
 import { createHttpServer, createServices } from "./http.ts";
 import { keyedRunClock } from "./settings.ts";
 import { openStore } from "./store.ts";
@@ -63,7 +64,7 @@ export async function start(config: Config = loadConfig()) {
     settings: services.settings,
     state: services.cleanerState,
   });
-  const schedule = scheduleWeekly(
+  const schedule = scheduleAt(
     async () => {
       const report = await cleaner.run();
 
@@ -76,7 +77,7 @@ export async function start(config: Config = loadConfig()) {
         }),
       );
     },
-    { state: services.cleanerState },
+    { ...CLEANER_SLOT, state: services.cleanerState },
   );
 
   const defectSweepSchedule = scheduleAt(
@@ -115,6 +116,10 @@ export async function start(config: Config = loadConfig()) {
   asksTimer.unref();
 
   void expireAsks();
+
+  services.embedderHealth
+    .refresh(() => checkEmbedderBuild(store, config.embedUrl, config.embedModel))
+    .catch((error) => console.error(error));
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);

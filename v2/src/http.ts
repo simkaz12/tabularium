@@ -3,6 +3,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 
 import { HttpError } from "./domain.ts";
 import { EmbedError } from "./embed.ts";
+import { EmbedderHealth } from "./embedderBuild.ts";
 import type { Embedder } from "./embed.ts";
 import { ProposalService } from "./proposals.ts";
 import type { ProposalOptions } from "./proposals.ts";
@@ -21,6 +22,7 @@ export interface Services {
   recall: RecallService;
   settings: SettingsService;
   cleanerState: CleanerState;
+  embedderHealth: EmbedderHealth;
 }
 
 export interface ServiceOptions {
@@ -38,6 +40,7 @@ export function createServices(store: Store, embedder: Embedder, options: Servic
     recall: new RecallService(store, embedder, options.proposals ?? {}, now),
     settings: new SettingsService(store, now),
     cleanerState: new StoreCleanerState(store, now),
+    embedderHealth: new EmbedderHealth(),
   };
 }
 
@@ -123,7 +126,7 @@ async function route(services: Services, req: IncomingMessage, url: URL): Promis
   const [head, id, action] = parts;
 
   if (method === "GET" && head === "health" && parts.length === 1) {
-    return [200, { ok: true }];
+    return [200, { ok: true, embedder: services.embedderHealth.get() }];
   }
 
   if (head === "settings" && parts.length === 1) {
@@ -181,6 +184,7 @@ async function route(services: Services, req: IncomingMessage, url: URL): Promis
         kind: query.get("kind"),
         audience: query.get("audience"),
         limit,
+        task: query.get("task"),
       }),
     ];
   }
@@ -194,6 +198,18 @@ async function route(services: Services, req: IncomingMessage, url: URL): Promis
       const body = (await readBody(req)) as { reason?: unknown } | undefined;
 
       return [200, await services.records.unsupersede(id, body?.reason)];
+    }
+
+    if (method === "POST" && parts.length === 3 && action === "archive") {
+      const body = (await readBody(req)) as { reason?: unknown } | undefined;
+
+      return [200, await services.records.archive(id, body?.reason)];
+    }
+
+    if (method === "POST" && parts.length === 3 && action === "unarchive") {
+      await readBody(req);
+
+      return [200, await services.records.unarchive(id)];
     }
 
     if (method === "POST" && parts.length === 3 && action === "take") {

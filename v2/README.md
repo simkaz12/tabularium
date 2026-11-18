@@ -38,6 +38,17 @@ Node 22.18 or newer. The server strips types itself, so there is no build step.
 
 Containment and fold asks apply only to fact and decision proposals with no `target`. Requests whose `Host` header is not in `TABULARIUM_ALLOWED_HOSTS` get a 403. There is no other auth; bind it to loopback or a private interface (for example a VPN address) and keep it off the public internet.
 
+## Re-embedding
+
+Stored vectors must come from the same Ollama build as query vectors. After pinning or changing the Ollama image, stop the service, then:
+
+```
+npm run reembed -- --dry-run   # counts rows, times 10 embeds, shows the current stamp
+npm run reembed                # rewrites every vector in records and legacy, every lifecycle
+```
+
+The run writes the build stamp (`embedderBuild` row in the settings table: model, digest, Ollama version, time) only if Ollama's build did not change during the run. It is idempotent; rerun after a failure. Run it with the service stopped: the store is single-writer.
+
 ## API
 
 Base `/v2`. Bodies and responses are JSON.
@@ -51,19 +62,23 @@ Base `/v2`. Bodies and responses are JSON.
 | `POST /proposals/:id/approve` | write a record or apply the proposal's target action; `edits` may carry `headline`, `scope`, `purpose`, `topic`, `audience` and `fields.{claim,rejected,where,trigger,leftBecause,fixHint,impact}`; the body also takes top-level `supersedes` (record ids) and `reason` (a reason class: `correction`, `changed` or `elaborated`, required when a supersede applies) |
 | `POST /proposals/:id/reject` | close without a record, body `{"reason": "..."}` with a non-empty reason |
 | `POST /proposals/:id/reinforce` | body `{"recordId": "..."}`, required; count a reinforcement on that record, close without a record, return the record; a legacy `recordId` promotes a copy |
-| `GET /recall?q=&scope=&kind=&audience=&limit=` | `q` is required (400 when empty); `limit` is a positive integer, default 10, at most 50; a bad `kind` or `audience` returns 400; hybrid search over v2 and legacy, reranked by Jev; `kind` is `fact`, `decision` or `defect`; `audience` keeps records for that role and unlabelled ones |
+| `GET /recall?q=&task=&scope=&kind=&audience=&limit=` | `q` is required (400 when empty); `task` is the caller's current work, cut to 300 characters and optional here, and feeds one extra vector search; `limit` is a positive integer, default 17, at most 50; a bad `kind` or `audience` returns 400; hybrid search over v2 and legacy, reranked by Jev on `q` alone; `kind` is `fact`, `decision` or `defect`; `audience` keeps records for that role and unlabelled ones |
 | `GET /records/:id` | one record with lineage and `takenBy` |
 | `POST /records/:id/take` | mark an open defect as taken, body `{"threadId": "...", "link": "..."}` with both non-empty, returns the record |
 | `POST /records/:id/release` | return a taken defect to open, empty body, returns the record; `takenAt` keeps the last-take time and `takenBy` is `null`; a defect that is not taken comes back unchanged |
 | `POST /records/:id/unsupersede` | undo a supersede, `reason` required |
+| `POST /records/:id/archive` | move a live, non-defect record or legacy row to `archived` (history, kept, never recalled or offered as a neighbour), `reason` required, stored as `lifecycleNote` |
+| `POST /records/:id/unarchive` | return an `archived` record to `live`, empty body, clears the note |
 | `DELETE /records/:id` | delete a record that holds a secret, body `{"reason": "...", "category": "secret"}` |
 | `GET /settings` | server settings, currently `{"cleanerConfidenceFloor": 0.7}` |
 | `PUT /settings` | change settings, body `{"cleanerConfidenceFloor": 0.8}`, returns the full settings |
-| `GET /health` | liveness |
+| `GET /health` | liveness, plus `embedder`: the startup comparison of the running Ollama build (model, model digest, Ollama version) against the build that made the stored vectors; `status` is `match`, `mismatch`, `missing` (no stamp), `unreachable` or `unchecked` (check still running). A mismatch also logs an `embedder-build-warning` line and never blocks startup |
 
 ### Proposal body
 
-`POST /proposals` takes `kind` (`fact`, `decision` or `defect`), `headline` (100 characters at most, the claim in one sentence), `fields`, `scope`, `provenance`, `origin` (`agent` when omitted), an optional `audience` (`decider`, `builder`, `reviewer` or `navigator`) and an optional `target`.
+`POST /proposals` takes `kind` (`fact`, `decision` or `defect`), `headline` (100 characters at most, the claim in one sentence), `fields`, `scope`, `provenance`, `origin` (`agent` when omitted), an optional `audience` (`decider`, `builder`, `reviewer` or `navigator`), an optional `target` and an optional `supersedes`.
+
+On this route `target` accepts only `action: "close"`; any other action is a 400, and the cleaner and defect sweep set their targets inside the server. `supersedes` lists 1 to 5 record ids (trimmed, deduplicated) the note replaces. Each must exist, be live, not be a defect and sit in the note's own scope, or the whole proposal is refused (404, 409 or 400) with nothing written. The note then saves as written, skipping the reinforce and fold-ask branches, and each listed record becomes `superseded` (a legacy row becomes `retired`) with `supersededBy` set and reason `changed`; `POST /records/:id/unsupersede` undoes it. `supersedes` together with a `close` target is a 400.
 
 - `fields.claim` is required for every kind. The record has no `why`: the thread excerpt in `provenance.excerpt` is the reason. A `fields.why` key is accepted and ignored.
 - A decision names the ruled-out option in `fields.rejected`.
@@ -86,7 +101,7 @@ A gate answer at confidence 0.5 or higher raises a `demote:<question>=<answer>` 
 
 A defect record moves `open`, `taken`, `closed`. `POST /records/:id/take` sets `defectStatus: "taken"` with `takenThreadId`, `takenLink` and `takenAt`, also returned as `takenBy: {threadId, link, at}`; no proposal and no approval. Taking a taken or closed defect returns 409, and a record that is not a defect returns 400. Release returns the defect to `open` and clears `takenThreadId` and `takenLink`; `takenAt` stays as the last-take time, and `takenBy` is `null` while no thread holds the defect. Closing goes through a proposal with `target: {recordId, source: "v2", action: "close"}`: an agent close proposal sets `defectStatus: "closed"`, `closedBy` to the proposal id and `closedAt` on create, writes no new record and answers `approved` with the defect's id; a cleaner close tile does the same on approve. The proposal's excerpt is the proof. A close proposal for a missing record returns 404 and for a record that is not an open or taken v2 defect returns 409.
 
-Recall results carry `audience`, `reader`, `stage`, `where`, `trigger`, `leftBecause`, `defectStatus` and `takenBy` next to the existing fields; `fields.why` is `null` unless the row is a legacy one that has it.
+Recall rows carry `id`, `source`, `kind`, `headline`, `scope` and `score`. After the Jev rerank, rows scoring under 0.6 are dropped. The first five rows scoring 1.0 or more also carry `fields.claim`; the rest carry the headline only. `purpose`, `topic`, `audience`, `reader`, `stage`, `where`, `trigger`, `leftBecause`, `defectStatus` and `takenBy` appear only when set. `why` and `rejected` are never returned by recall; `GET /records/:id` returns the full record. A row with no Jev score (Jev off, or its call failed) skips the floor and counts as above the claim line.
 
 Recall with a `scope` also returns `global` records. Quotes and other full-text syntax in `q` are escaped, so any query text returns hits instead of an error. If a Jev rerank call fails, that hit keeps its hybrid position while the scored hits reorder among theirs. Recall falls back to hybrid order only when every call fails.
 
@@ -98,7 +113,7 @@ Recall with a `scope` also returns `global` records. Quotes and other full-text 
 | 403 | `Host` header not allowed |
 | 404 | unknown route, record or proposal |
 | 413 | request body over 1,000,000 bytes |
-| 409 | approve, reject or reinforce on a proposal that is not pending; take on a defect that is taken or closed; a close for a record that is not an open or taken v2 defect; a reinforce, supersede or retire on a record that is not live; a second promote of the same legacy row; `unsupersede` on a record that is not superseded, or on a legacy row a v2 record replaced; `DELETE` on a record that is the replacement for another record |
+| 409 | approve, reject or reinforce on a proposal that is not pending; take on a defect that is taken or closed; a close for a record that is not an open or taken v2 defect; a reinforce, supersede, retire or archive on a record that is not live; an archive of a defect; an `unarchive` of a record that is not archived; a second promote of the same legacy row; `unsupersede` on a record that is not superseded, or on a legacy row a v2 record replaced; `DELETE` on a record that is the replacement for another record |
 | 500 | internal error |
 | 503 | the embedder is down (Ollama unreachable or returning bad vectors) |
 
@@ -131,13 +146,15 @@ Legacy rows are created only by the import. Their content never changes, and the
 
 `unsupersede` on a retired legacy row restores it to `live` unless a v2 record carries its `legacyId`, in which case it returns 409.
 
+`archived` is a lifecycle value apart from `retired`: the row is history, not wrong. `GET /records/:id` still returns it with `lifecycle: "archived"`. Only `unarchive` brings it back; `unsupersede` on it is a 409. `archive` on a row that is not live, or on a defect, is a 409.
+
 ## Settings
 
 Settings live in the store's `settings` table on the server, so every T3 Code machine sees the same values. The only one is `cleanerConfidenceFloor`, default 0.7. To change it, open T3 Code Settings, go to the memory section and edit "Cleaner confidence floor" (0 to 1, step 0.05). It saves on blur and calls `PUT /v2/settings`. The cleaner reads it at the start of each run.
 
 ## Cleaner
 
-Sundays at 03:00 server time the cleaner proposes at most five tiles: legacy promotions, merges of near-duplicates, supersedes for contradicted records and retirements of stale ones. A doubts pass runs first, outside that cap. It never writes a record. A record with a pending proposal or a rejection in the last 90 days is skipped. Each tile blocks both of its record ids for the rest of the run, so three identical records produce one merge tile, not a chain. The same applies to the target and the replacement of every pending or recently rejected proposal from earlier runs.
+Every day at 03:00 server time the cleaner proposes at most five tiles per run, so up to five a day: legacy promotions, merges of near-duplicates, supersedes for contradicted records and retirements of stale ones. A doubts pass runs first, outside that cap. It never writes a record. A record with a pending proposal or a rejection in the last 90 days is skipped. Each tile blocks both of its record ids for the rest of the run, so three identical records produce one merge tile, not a chain. The same applies to the target and the replacement of every pending or recently rejected proposal from earlier runs.
 
 ### Doubts pass
 
@@ -160,7 +177,7 @@ One bad candidate never stops the run. Each Jev call and each tile write is guar
 
 ### Catch-up
 
-The last run time is saved in `cleaner_state`. On startup, if the most recent Sunday 03:00 is later than the saved time, the cleaner runs about 30 seconds after start. With no saved time it records the current time and does not run.
+The last run time is saved in `cleaner_state`. On startup, if the most recent 03:00 is later than the saved time, the cleaner runs about 30 seconds after start. With no saved time it records the current time and does not run.
 
 ### Defect sweep
 

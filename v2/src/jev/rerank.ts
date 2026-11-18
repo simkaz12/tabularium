@@ -1,5 +1,5 @@
 import type { JevClient, JevResponse } from "../domain.ts";
-import type { RecallResult, Reranker } from "../recall.ts";
+import type { RecallCandidate, Reranker } from "../recall.ts";
 import { ask, scoreOf } from "./checks.ts";
 import { RERANK_QUESTION } from "./questions.ts";
 
@@ -13,7 +13,7 @@ export interface RerankOptions {
   onError?: (error: unknown) => void;
 }
 
-function candidateState(query: string, candidate: RecallResult) {
+function candidateState(query: string, candidate: RecallCandidate) {
   return {
     query,
     record: {
@@ -28,11 +28,11 @@ function candidateState(query: string, candidate: RecallResult) {
 }
 
 export function orderByScore(
-  candidates: readonly RecallResult[],
+  candidates: readonly RecallCandidate[],
   scores: ReadonlyArray<number | null>,
-): RecallResult[] {
+): RecallCandidate[] {
   const slots: number[] = [];
-  const scored: Array<{ candidate: RecallResult; index: number; rank: number }> = [];
+  const scored: Array<{ candidate: RecallCandidate; index: number; rank: number }> = [];
 
   candidates.forEach((candidate, index) => {
     const score = scores[index];
@@ -42,7 +42,7 @@ export function orderByScore(
     }
 
     slots.push(index);
-    scored.push({ candidate: { ...candidate, score }, index, rank: candidate.source === "v2" ? 0 : 1 });
+    scored.push({ candidate: { ...candidate, score, jevScored: true }, index, rank: candidate.source === "v2" ? 0 : 1 });
   });
 
   scored.sort((a, b) => {
@@ -60,7 +60,7 @@ export function orderByScore(
   const ordered = [...candidates];
 
   slots.forEach((slot, position) => {
-    ordered[slot] = (scored[position] as { candidate: RecallResult }).candidate;
+    ordered[slot] = (scored[position] as { candidate: RecallCandidate }).candidate;
   });
 
   return ordered;
@@ -69,7 +69,7 @@ export function orderByScore(
 export function createJevReranker(options: RerankOptions): Reranker {
   const batchSize = options.batchSize ?? RERANK_BATCH;
 
-  async function scoreOne(query: string, candidate: RecallResult): Promise<number> {
+  async function scoreOne(query: string, candidate: RecallCandidate): Promise<number> {
     const response: JevResponse = await ask(
       options.client,
       options.model,

@@ -856,9 +856,7 @@ export interface SlotOptions extends ScheduleOptions {
   label?: string;
 }
 
-export function scheduleWeekly(run: () => Promise<unknown>, options: ScheduleOptions = {}): CleanerSchedule {
-  return scheduleAt(run, { ...options, weekday: 0, hour: 3 });
-}
+export const CLEANER_SLOT = { weekday: null, hour: 3, label: "cleaner" } as const satisfies SlotOptions;
 
 export function scheduleAt(run: () => Promise<unknown>, options: SlotOptions): CleanerSchedule {
   const { weekday, hour } = options;

@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node src/main.ts",
     "typecheck": "tsc --noEmit",
+    "reembed": "node src/scripts/reembed.ts",
     "test": "vitest run"
   },
   "dependencies": {

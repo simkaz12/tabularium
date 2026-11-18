@@ -1,5 +1,5 @@
 export type Kind = "fact" | "decision" | "defect";
-export type Lifecycle = "live" | "superseded" | "retired";
+export type Lifecycle = "live" | "superseded" | "retired" | "archived";
 export type ReasonClass = "correction" | "changed" | "elaborated";
 export type Origin = "agent" | "harvest" | "cleaner" | "promotion";
 export type Source = "v2" | "legacy";
@@ -125,6 +125,7 @@ export interface ProposalBody {
   provenance: Provenance;
   origin: Origin;
   target?: ProposalTarget | null;
+  supersedes?: string[];
   audience?: Audience | null;
   reader?: Reader | null;
 }

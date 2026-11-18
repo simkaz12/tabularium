@@ -358,6 +358,14 @@ export class RecordService {
       throw new HttpError(409, `record ${id} is ${found.row.lifecycle}, not live`);
     }
 
+    if (byId !== null) {
+      const replacement = await this.require(byId);
+
+      if (replacement.row.lifecycle !== "live") {
+        throw new HttpError(409, `replacement ${byId} is ${replacement.row.lifecycle}, not live`);
+      }
+    }
+
     return this.writeLegacyRetirement(found, byId, reason, null);
   }
 
@@ -435,6 +443,50 @@ export class RecordService {
     });
   }
 
+  async archive(id: string, reason: unknown): Promise<RecordView> {
+    const note = requireText(reason, "reason");
+
+    return this.store.withLock(async () => {
+      const found = await this.require(id);
+
+      if (found.row.kind === "defect") {
+        throw new HttpError(409, `record ${id} is a defect and cannot be archived`);
+      }
+
+      if (found.row.lifecycle !== "live") {
+        throw new HttpError(409, `record ${id} is ${found.row.lifecycle}, not live`);
+      }
+
+      const updated = {
+        ...found.row,
+        lifecycle: "archived" as const,
+        lifecycleNote: note,
+      };
+      await upsert(found.table, [updated as unknown as Record<string, unknown>]);
+
+      return this.get(id);
+    });
+  }
+
+  async unarchive(id: string): Promise<RecordView> {
+    return this.store.withLock(async () => {
+      const found = await this.require(id);
+
+      if (found.row.lifecycle !== "archived") {
+        throw new HttpError(409, `record ${id} is ${found.row.lifecycle}, not archived`);
+      }
+
+      const updated = {
+        ...found.row,
+        lifecycle: "live" as const,
+        lifecycleNote: null,
+      };
+      await upsert(found.table, [updated as unknown as Record<string, unknown>]);
+
+      return this.get(id);
+    });
+  }
+
   private async assertRestorable(found: Located): Promise<void> {
     const lifecycle = found.row.lifecycle;
 
@@ -446,8 +498,8 @@ export class RecordService {
       return;
     }
 
-    if (lifecycle === "live") {
-      throw new HttpError(409, `record ${found.row.id} is live, not superseded or retired`);
+    if (lifecycle === "live" || lifecycle === "archived") {
+      throw new HttpError(409, `record ${found.row.id} is ${lifecycle}, not superseded or retired`);
     }
 
     const promoted = await selectWhere<MemoryRecord>(

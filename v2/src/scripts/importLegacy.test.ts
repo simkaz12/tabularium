@@ -36,7 +36,7 @@ function fixtureLine(index: number, overrides: Record<string, unknown> = {}): Re
     why: `why number ${index}`,
     rejected: index % 2 === 0 ? `rejected ${index}` : null,
     scope: "project-a",
-    oldScope: index === 1 ? "mobile" : "project-a",
+    oldScope: index === 1 ? "project-c" : "project-a",
     oldSource: "v1",
     purpose: "pitfall",
     topic: index === 2 ? null : "test harness",

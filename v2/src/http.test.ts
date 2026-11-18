@@ -70,6 +70,12 @@ describe("http", () => {
     expect((await call("GET", "/health")).status).toBe(200);
   });
 
+  it("reports the embedder check on /health without blocking", async () => {
+    const health = await call("GET", "/health");
+
+    expect(health.body).toEqual({ ok: true, embedder: { status: "unchecked" } });
+  });
+
   it("runs propose, list and recall end to end with the record live on create", async () => {
     const created = await call("POST", "/proposals", proposalBody());
     expect(created.status).toBe(201);
@@ -157,6 +163,28 @@ describe("http", () => {
     });
     expect(removed.body).toEqual({ id: supersededLegacy.id, deleted: true });
     expect((await call("GET", `/records/${supersededLegacy.id}`)).status).toBe(404);
+  });
+
+  it("serves archive and unarchive", async () => {
+    const legacy = await seedLegacy(harness);
+    const record = await seedRecord(harness);
+    const defect = await call("POST", "/proposals", defectBody());
+
+    const archived = await call("POST", `/records/${legacy.id}/archive`, { reason: "legacy history" });
+    expect(archived.status).toBe(200);
+    expect(archived.body.lifecycle).toBe("archived");
+    expect((await call("GET", `/records/${legacy.id}`)).body.lifecycle).toBe("archived");
+
+    expect((await call("POST", `/records/${legacy.id}/archive`, { reason: "again" })).status).toBe(409);
+    expect((await call("POST", `/records/${record.id}/archive`, {})).status).toBe(400);
+    expect((await call("POST", `/records/${defect.body.resolution.recordId}/archive`, { reason: "x" })).status).toBe(409);
+    expect((await call("POST", `/records/${record.id}/unarchive`)).status).toBe(409);
+    expect((await call("POST", "/records/missing/archive", { reason: "x" })).status).toBe(404);
+
+    const restored = await call("POST", `/records/${legacy.id}/unarchive`);
+    expect(restored.status).toBe(200);
+    expect(restored.body.lifecycle).toBe("live");
+    expect(restored.body.lifecycleNote).toBeNull();
   });
 
   it("answers errors as json", async () => {
@@ -336,7 +364,18 @@ describe("http", () => {
     const refused = await call("GET", "/recall?q=repl&audience=wizard");
 
     expect(recalled.body.results.map((entry: { id: string }) => entry.id)).toEqual([mine.id]);
-    expect(recalled.body.results[0]).toMatchObject({ audience: "builder", takenBy: null, defectStatus: null });
+    expect(recalled.body.results[0]).toMatchObject({ audience: "builder" });
     expect(refused.status).toBe(400);
+  });
+
+  it("passes the recall task through to the search", async () => {
+    await seedRecord(harness, { headline: "repl readline", claim: "repl readline error" });
+    const taskOnly = await seedRecord(harness, { headline: "zebra quartz migration", claim: "zebra quartz rule" });
+
+    const without = await call("GET", "/recall?q=repl%20readline&limit=1");
+    const withTask = await call("GET", "/recall?q=repl%20readline&limit=2&task=zebra%20quartz%20migration%20rule");
+
+    expect(without.body.results.map((entry: { id: string }) => entry.id)).not.toContain(taskOnly.id);
+    expect(withTask.body.results.map((entry: { id: string }) => entry.id)).toContain(taskOnly.id);
   });
 });

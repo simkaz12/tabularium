@@ -14,7 +14,7 @@ import {
   stubJev,
 } from "./testing.ts";
 import type { Harness } from "./testing.ts";
-import type { LegacyRecord, MemoryRecord } from "./domain.ts";
+import type { LegacyRecord, MemoryRecord, Proposal } from "./domain.ts";
 
 let harness: Harness;
 
@@ -70,7 +70,7 @@ describe("propose", () => {
         headline: "Edited headline",
         fields: { rejected: "edited rejected" },
         audience: "reviewer",
-        scope: "game",
+        scope: "project-b",
         topic: "tooling",
       },
     });
@@ -79,7 +79,7 @@ describe("propose", () => {
     expect(record.rejected).toBe("edited rejected");
     expect(record.audience).toBe("reviewer");
     expect(record.claim).toBe(proposal.fields.claim);
-    expect(record.scope).toBe("game");
+    expect(record.scope).toBe("project-b");
     expect(record.topic).toBe("tooling");
   });
 
@@ -867,6 +867,203 @@ describe("origin guard", () => {
     expect(proposal.origin).toBe("cleaner");
     expect(proposal.status).toBe("pending");
     expect(await recordCount()).toBe(0);
+  });
+});
+
+describe("agent supersedes", () => {
+  const saved = (proposal: Proposal) => proposal.resolution?.recordId as string;
+
+  async function refused(supersedes: string[], status: number, scope = "project-a") {
+    const before = await recordCount();
+
+    await expect(
+      harness.services.proposals.create(proposalBody({ supersedes, scope })),
+    ).rejects.toMatchObject({ status });
+
+    expect(await recordCount()).toBe(before);
+  }
+
+  it("saves the note and supersedes a live v2 record with reason changed", async () => {
+    const old = await seedRecord(harness, { headline: "old claim" });
+
+    const proposal = await harness.services.proposals.create(proposalBody({ supersedes: [old.id] }));
+
+    expect(proposal.status).toBe("approved");
+    const view = await harness.services.records.get(old.id);
+    expect(view.lifecycle).toBe("superseded");
+    expect(view.supersededBy).toBe(saved(proposal));
+    expect(view.supersessionReason).toBe("changed");
+    expect((await harness.services.records.get(saved(proposal))).lifecycle).toBe("live");
+  });
+
+  it("retires a legacy row with supersededBy", async () => {
+    const legacy = await seedLegacy(harness);
+
+    const proposal = await harness.services.proposals.create(proposalBody({ supersedes: [legacy.id] }));
+
+    const archived = await findById<{ lifecycle: string; supersededBy: string }>(
+      harness.store.legacy,
+      legacy.id,
+    );
+    expect(archived?.lifecycle).toBe("retired");
+    expect(archived?.supersededBy).toBe(saved(proposal));
+  });
+
+  it("refuses a missing id and writes nothing", async () => {
+    await refused(["nope"], 404);
+  });
+
+  it("refuses a superseded record and leaves it untouched", async () => {
+    const old = await seedRecord(harness, { lifecycle: "superseded" });
+
+    await refused([old.id], 409);
+  });
+
+  it("refuses a defect and leaves it live and open", async () => {
+    const defect = await createApprovedDefect(harness);
+
+    await refused([defect.id], 400);
+
+    expect(await harness.services.records.get(defect.id)).toMatchObject({
+      lifecycle: "live",
+      defectStatus: "open",
+    });
+  });
+
+  it("refuses a record in another scope and leaves it live", async () => {
+    const other = await seedRecord(harness, { scope: "project-b" });
+
+    await refused([other.id], 400);
+
+    expect((await harness.services.records.get(other.id)).lifecycle).toBe("live");
+  });
+
+  it("refuses a valid id listed beside a bad one and writes nothing", async () => {
+    const good = await seedRecord(harness);
+
+    await refused([good.id, "nope"], 404);
+
+    expect((await harness.services.records.get(good.id)).lifecycle).toBe("live");
+  });
+
+  it("supersedes despite a Jev reinforce suggestion", async () => {
+    const jevHarness = await makeHarness({
+      proposals: { jev: stubJev({ relation: () => choiceAnswer("restatement", 0.9) }) },
+    });
+
+    try {
+      const old = await seedRecord(jevHarness, {
+        headline: proposalBody().headline,
+        claim: proposalBody().fields.claim,
+      });
+
+      const proposal = await jevHarness.services.proposals.create(proposalBody({ supersedes: [old.id] }));
+
+      expect(proposal.status).toBe("approved");
+      const view = await jevHarness.services.records.get(old.id);
+      expect(view.lifecycle).toBe("superseded");
+      expect(view.reinforcedCount).toBe(0);
+      expect(await jevHarness.store.records.countRows()).toBe(2);
+    } finally {
+      jevHarness.cleanup();
+    }
+  });
+
+  it("supersedes despite a fold ask on a covering neighbour", async () => {
+    const jevHarness = await makeHarness({
+      proposals: {
+        jev: stubJev({
+          new_covers_old: () => ({ probability: 0.95, covers: true }) as never,
+          relation: () => choiceAnswer("distinct", 0.9),
+        }),
+        containment: true,
+        foldAsk: true,
+      },
+    });
+
+    try {
+      const old = await seedRecord(jevHarness, {
+        headline: proposalBody().headline,
+        claim: proposalBody().fields.claim,
+      });
+
+      const proposal = await jevHarness.services.proposals.create(proposalBody({ supersedes: [old.id] }));
+
+      expect(proposal.status).toBe("approved");
+      expect(proposal.ask).toBeNull();
+      expect((await jevHarness.services.records.get(old.id)).supersededBy).toBe(saved(proposal));
+    } finally {
+      jevHarness.cleanup();
+    }
+  });
+
+  it("refuses supersedes together with a close target", async () => {
+    const defect = await createApprovedDefect(harness);
+
+    await expect(
+      harness.services.proposals.create(
+        proposalBody({
+          supersedes: ["x"],
+          target: { recordId: defect.id, source: "v2", action: "close" },
+        }),
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("parses supersedes trimmed and deduped, and refuses an empty or oversized list", () => {
+    expect(parseProposalBody(proposalBody({ supersedes: [" a ", "a", "b"] })).supersedes).toEqual(["a", "b"]);
+    expect(() => parseProposalBody(proposalBody({ supersedes: [] }))).toThrow(
+      expect.objectContaining({ status: 400 }),
+    );
+    expect(() => parseProposalBody(proposalBody({ supersedes: ["1", "2", "3", "4", "5", "6"] }))).toThrow(
+      expect.objectContaining({ status: 400 }),
+    );
+  });
+
+  it("unsupersede restores a record superseded this way", async () => {
+    const old = await seedRecord(harness);
+    await harness.services.proposals.create(proposalBody({ supersedes: [old.id] }));
+
+    const restored = await harness.services.records.unsupersede(old.id, "wrong pairing");
+
+    expect(restored.lifecycle).toBe("live");
+    expect(restored.supersededBy).toBeNull();
+  });
+});
+
+describe("external target guard", () => {
+  const retire = (recordId: string) =>
+    proposalBody({ target: { recordId, source: "v2", action: "retire", reason: "stale" } });
+
+  it("refuses an external agent body with a retire target and writes nothing", async () => {
+    const stale = await seedRecord(harness);
+
+    expect(() => parseProposalBody(retire(stale.id))).toThrow(expect.objectContaining({ status: 400 }));
+    await expect(harness.services.proposals.create(retire(stale.id))).rejects.toMatchObject({ status: 400 });
+
+    expect((await harness.services.records.get(stale.id)).lifecycle).toBe("live");
+    expect(await recordCount()).toBe(1);
+  });
+
+  it("refuses merge, supersede and promote targets externally", () => {
+    for (const action of ["merge", "supersede", "promote"]) {
+      expect(() =>
+        parseProposalBody(proposalBody({ target: { recordId: "x", source: "v2", action } as never })),
+      ).toThrow(expect.objectContaining({ status: 400 }));
+    }
+  });
+
+  it("createInternal still accepts a retire target", async () => {
+    const stale = await seedRecord(harness);
+
+    const proposal = await harness.services.proposals.createInternal(
+      proposalBody({
+        origin: "cleaner",
+        target: { recordId: stale.id, source: "v2", action: "retire", reason: "stale" },
+      }),
+    );
+
+    expect(proposal.target?.action).toBe("retire");
   });
 });
 

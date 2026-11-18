@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { selectWhere } from "./store.ts";
-import { makeHarness, seedLegacy, seedRecord } from "./testing.ts";
+import { makeHarness, seedLegacy, seedRecord, stubJev } from "./testing.ts";
 import type { Harness } from "./testing.ts";
-import type { ReadLogEntry } from "./domain.ts";
+import type { JevRequest, ReadLogEntry } from "./domain.ts";
+import { DEFAULT_LIMIT, TASK_MAX_CHARS } from "./recall.ts";
 
 let harness: Harness;
 
@@ -34,7 +35,7 @@ describe("recall", () => {
     ]);
     expect(results[0]?.score).toBe(results[1]?.score);
     expect(results[0]?.headline).toBe(repl.headline);
-    expect(results[0]?.fields.claim).toBe(repl.claim);
+    expect(results[0]?.fields?.claim).toBe(repl.claim);
   });
 
   it("writes one read_log row per returned result", async () => {
@@ -82,7 +83,7 @@ describe("recall", () => {
   it("filters by scope, keeping global, and by kind", async () => {
     const mine = await seedRecord(harness, { ...repl, scope: "project-a" });
     const shared = await seedRecord(harness, { ...repl, scope: "global" });
-    await seedRecord(harness, { ...repl, scope: "game" });
+    await seedRecord(harness, { ...repl, scope: "project-b" });
     const decision = await seedRecord(harness, { ...repl, scope: "project-a", kind: "decision" });
 
     const scoped = await harness.services.recall.recall({ q: "repl readline error", scope: "project-a" });
@@ -115,7 +116,7 @@ describe("recall", () => {
     expect(everyone.results.length).toBe(5);
   });
 
-  it("carries audience, reader and stage on every result and null why when absent", async () => {
+  it("carries audience, reader and stage and drops why, rejected and empty keys", async () => {
     await seedRecord(harness, { ...repl, why: null, audience: "decider", reader: "ruling", stage: "design" });
 
     const { results } = await harness.services.recall.recall({ q: "repl readline error" });
@@ -124,11 +125,18 @@ describe("recall", () => {
       audience: "decider",
       reader: "ruling",
       stage: "design",
-      fields: { claim: repl.claim, why: null, rejected: null },
-      where: null,
-      defectStatus: null,
-      takenBy: null,
+      fields: { claim: repl.claim },
     });
+
+    for (const row of results) {
+      expect(row.fields).not.toHaveProperty("why");
+      expect(row.fields).not.toHaveProperty("rejected");
+      expect(Object.values(row).some((value) => value === null || value === "")).toBe(false);
+    }
+
+    expect(results[0]).not.toHaveProperty("where");
+    expect(results[0]).not.toHaveProperty("defectStatus");
+    expect(results[0]).not.toHaveProperty("takenBy");
   });
 
   it("returns defects with location and takenBy, open taken and closed alike", async () => {
@@ -160,8 +168,8 @@ describe("recall", () => {
       trigger: "more than 500 rows",
       leftBecause: "outside the ticket",
       defectStatus: "open",
-      takenBy: null,
     });
+    expect(byId.get(open.id)).not.toHaveProperty("takenBy");
     expect(byId.get(taken.id)).toMatchObject({
       defectStatus: "taken",
       takenBy: { threadId: "thread-2", link: "t3-thread://thread-2", at: "2026-11-01T09:00:00.000Z" },
@@ -194,5 +202,192 @@ describe("recall", () => {
     await expect(harness.services.recall.recall({ q: "  " })).rejects.toMatchObject({ status: 400 });
     await expect(harness.services.recall.recall({ q: "x", kind: "note" })).rejects.toMatchObject({ status: 400 });
     await expect(harness.services.recall.recall({ q: "x", limit: 0 })).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("returns 17 rows by default from 20 candidates", async () => {
+    for (let index = 0; index < 20; index += 1) {
+      await seedRecord(harness, { headline: `repl readline ${index}`, claim: "repl readline error", why: "w" });
+    }
+
+    const { results } = await harness.services.recall.recall({ q: "repl readline" });
+
+    expect(DEFAULT_LIMIT).toBe(17);
+    expect(results.length).toBe(17);
+  });
+
+  it("finds a task-only record only when a task is given", async () => {
+    await seedRecord(harness, { headline: "repl readline crashes", claim: "repl readline error", why: "w" });
+    const taskOnly = await seedRecord(harness, {
+      headline: "zebra quartz migration",
+      claim: "zebra quartz rule",
+      why: "w",
+    });
+
+    const without = await harness.services.recall.recall({ q: "repl readline error", limit: 1 });
+    const withTask = await harness.services.recall.recall({
+      q: "repl readline error",
+      task: "zebra quartz migration zebra quartz rule",
+      limit: 2,
+    });
+
+    expect(without.results.map((entry) => entry.id)).not.toContain(taskOnly.id);
+    expect(withTask.results.map((entry) => entry.id)).toContain(taskOnly.id);
+  });
+
+  it("cuts a long task to 300 characters before embedding", async () => {
+    await seedRecord(harness, repl);
+    const seen: string[] = [];
+    const embed = harness.embedder.embed.bind(harness.embedder);
+    harness.embedder.embed = async (text: string) => {
+      seen.push(text);
+
+      return embed(text);
+    };
+
+    await harness.services.recall.recall({ q: "repl readline error", task: "a".repeat(1000) });
+
+    expect(seen).toContain("a".repeat(TASK_MAX_CHARS));
+    expect(seen.every((text) => text.length <= TASK_MAX_CHARS)).toBe(true);
+  });
+
+  it("treats a blank task as absent", async () => {
+    await seedRecord(harness, repl);
+    const seen: string[] = [];
+    const embed = harness.embedder.embed.bind(harness.embedder);
+    harness.embedder.embed = async (text: string) => {
+      seen.push(text);
+
+      return embed(text);
+    };
+
+    await harness.services.recall.recall({ q: "repl readline error", task: "   " });
+
+    expect(seen).toEqual(["repl readline error"]);
+  });
+});
+
+const scoreAnswer = (score: number) => ({ type: "score", score, confidence: 0.9, legend: {}, probabilities: {} });
+
+describe("recall floor, claim slots and log", () => {
+  it("drops a jev-scored row under the floor", async () => {
+    const stub = stubJev({
+      rerank: (_q, req: JevRequest) => scoreAnswer((req.state as any).record.headline.includes("weak") ? 0.5 : 2),
+    });
+    harness.cleanup();
+    harness = await makeHarness({ proposals: { jev: stub, model: "jev-test" } });
+    await seedRecord(harness, { headline: "repl readline weak", claim: "repl readline error", why: "a" });
+    const strong = await seedRecord(harness, { headline: "repl readline strong", claim: "repl readline error", why: "b" });
+
+    const { results } = await harness.services.recall.recall({ q: "repl readline error" });
+
+    expect(results.map((entry) => entry.id)).toEqual([strong.id]);
+  });
+
+  it("gives claims to exactly the first five rows at or above the line", async () => {
+    const stub = stubJev({ rerank: () => scoreAnswer(2) });
+    harness.cleanup();
+    harness = await makeHarness({ proposals: { jev: stub, model: "jev-test" } });
+
+    for (let index = 0; index < 7; index += 1) {
+      await seedRecord(harness, { headline: `repl readline ${index}`, claim: "repl readline error", why: "w" });
+    }
+
+    const { results } = await harness.services.recall.recall({ q: "repl readline", limit: 17 });
+
+    expect(results.length).toBe(7);
+    expect(results.map((entry) => entry.fields !== undefined)).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+    ]);
+  });
+
+  it("returns a row between the floor and the line without a claim", async () => {
+    const stub = stubJev({ rerank: () => scoreAnswer(0.8) });
+    harness.cleanup();
+    harness = await makeHarness({ proposals: { jev: stub, model: "jev-test" } });
+    await seedRecord(harness, repl);
+
+    const { results } = await harness.services.recall.recall({ q: "repl readline error" });
+
+    expect(results.length).toBe(1);
+    expect(results[0]).not.toHaveProperty("fields");
+    expect(results[0]?.score).toBe(0.8);
+  });
+
+  it("keeps rows unfiltered with claims on the first five when every jev call fails", async () => {
+    const stub = stubJev();
+    stub.failWith = new Error("down");
+    harness.cleanup();
+    harness = await makeHarness({ proposals: { jev: stub, model: "jev-test" } });
+
+    for (let index = 0; index < 7; index += 1) {
+      await seedRecord(harness, { headline: `repl readline ${index}`, claim: "repl readline error", why: "w" });
+    }
+
+    const { results } = await harness.services.recall.recall({ q: "repl readline" });
+
+    expect(results.length).toBe(7);
+    expect(results.filter((entry) => entry.fields !== undefined).length).toBe(5);
+    expect(results.slice(0, 5).every((entry) => entry.fields !== undefined)).toBe(true);
+  });
+
+  it("keeps rows unfiltered with claims on the first five when jev is off", async () => {
+    for (let index = 0; index < 7; index += 1) {
+      await seedRecord(harness, { headline: `repl readline ${index}`, claim: "repl readline error", why: "w" });
+    }
+
+    const { results } = await harness.services.recall.recall({ q: "repl readline" });
+
+    expect(results.length).toBe(7);
+    expect(results.slice(0, 5).every((entry) => entry.fields !== undefined)).toBe(true);
+    expect(results.slice(5).some((entry) => entry.fields !== undefined)).toBe(false);
+  });
+
+  it("drops candidates beyond the rerank pool when jev ran", async () => {
+    const judged = new Set<string>();
+    const stub = stubJev({
+      rerank: (_q, req: JevRequest) => {
+        const headline = (req.state as any).record.headline as string;
+        judged.add(headline);
+
+        return scoreAnswer(headline.endsWith(" 0") || headline.endsWith(" 1") ? 2 : 0.5);
+      },
+    });
+    harness.cleanup();
+    harness = await makeHarness({ proposals: { jev: stub, model: "jev-test" } });
+
+    for (let index = 0; index < 30; index += 1) {
+      await seedRecord(harness, { headline: `repl readline ${index}`, claim: "repl readline error", why: "w" });
+    }
+
+    const { results } = await harness.services.recall.recall({ q: "repl readline", limit: 25 });
+
+    expect(judged.size).toBe(20);
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.length).toBeLessThan(20);
+    expect(results.every((entry) => judged.has(entry.headline))).toBe(true);
+    expect(results.every((entry) => entry.score >= 0.6)).toBe(true);
+  });
+
+  it("logs the rows that survive the floor and the limit", async () => {
+    const stub = stubJev({
+      rerank: (_q, req: JevRequest) => scoreAnswer((req.state as any).record.headline.includes("weak") ? 0.5 : 2),
+    });
+    harness.cleanup();
+    harness = await makeHarness({ proposals: { jev: stub, model: "jev-test" } });
+    await seedRecord(harness, { headline: "repl readline weak", claim: "repl readline error", why: "a" });
+    await seedRecord(harness, { headline: "repl readline one", claim: "repl readline error", why: "b" });
+    await seedRecord(harness, { headline: "repl readline two", claim: "repl readline error", why: "c" });
+
+    const { results } = await harness.services.recall.recall({ q: "repl readline error", limit: 1 });
+    const log = await selectWhere<ReadLogEntry>(harness.store.readLog, undefined);
+
+    expect(results.length).toBe(1);
+    expect(log.map((entry) => entry.resultId)).toEqual(results.map((entry) => entry.id));
   });
 });

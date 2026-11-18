@@ -21,8 +21,12 @@ import { andAll, hybridSearch, insert, scopeClause, sqlString } from "./store.ts
 import type { Hit, Store } from "./store.ts";
 
 export const RERANK_POOL = 20;
-export const DEFAULT_LIMIT = 10;
+export const DEFAULT_LIMIT = 17;
 export const MAX_LIMIT = 50;
+export const SCORE_FLOOR = 0.6;
+export const CLAIM_LINE = 1.0;
+export const CLAIM_SLOTS = 5;
+export const TASK_MAX_CHARS = 300;
 
 export interface RecallParams {
   q: string;
@@ -30,9 +34,10 @@ export interface RecallParams {
   kind?: string | null;
   audience?: string | null;
   limit?: number | null;
+  task?: string | null;
 }
 
-export interface RecallResult {
+export interface RecallCandidate {
   id: string;
   source: Source;
   kind: Kind;
@@ -50,11 +55,32 @@ export interface RecallResult {
   defectStatus: DefectStatus | null;
   takenBy: TakenBy | null;
   score: number;
+  jevScored?: boolean;
 }
 
-export type Reranker = (query: string, candidates: RecallResult[]) => Promise<RecallResult[] | null>;
+export interface RecallResult {
+  id: string;
+  source: Source;
+  kind: Kind;
+  headline: string;
+  scope: string;
+  score: number;
+  fields?: { claim: string };
+  purpose?: string;
+  topic?: string;
+  audience?: Audience;
+  reader?: Reader;
+  stage?: string;
+  where?: string;
+  trigger?: string;
+  leftBecause?: string;
+  defectStatus?: DefectStatus;
+  takenBy?: TakenBy;
+}
 
-export function toResult(row: StoredRecord, source: Source, score: number): RecallResult {
+export type Reranker = (query: string, candidates: RecallCandidate[]) => Promise<RecallCandidate[] | null>;
+
+export function toResult(row: StoredRecord, source: Source, score: number): RecallCandidate {
   return {
     id: row.id,
     source,
@@ -76,7 +102,7 @@ export function toResult(row: StoredRecord, source: Source, score: number): Reca
   };
 }
 
-export function mergeBySource(v2: Array<Hit<StoredRecord>>, legacy: Array<Hit<StoredRecord>>): RecallResult[] {
+export function mergeBySource(v2: Array<Hit<StoredRecord>>, legacy: Array<Hit<StoredRecord>>): RecallCandidate[] {
   const tagged = [
     ...v2.map((hit, order) => ({ result: toResult(hit.row, "v2", hit.score), order, rank: 0 })),
     ...legacy.map((hit, order) => ({ result: toResult(hit.row, "legacy", hit.score), order, rank: 1 })),
@@ -95,6 +121,61 @@ export function mergeBySource(v2: Array<Hit<StoredRecord>>, legacy: Array<Hit<St
   });
 
   return tagged.map((entry) => entry.result);
+}
+
+function present<T>(value: T | null | undefined): value is T {
+  return value !== null && value !== undefined && value !== "";
+}
+
+export function shapeResult(candidate: RecallCandidate, withClaim: boolean): RecallResult {
+  const optional: Partial<RecallResult> = {
+    purpose: candidate.purpose ?? undefined,
+    topic: candidate.topic ?? undefined,
+    audience: candidate.audience ?? undefined,
+    reader: candidate.reader ?? undefined,
+    stage: candidate.stage ?? undefined,
+    where: candidate.where ?? undefined,
+    trigger: candidate.trigger ?? undefined,
+    leftBecause: candidate.leftBecause ?? undefined,
+    defectStatus: candidate.defectStatus ?? undefined,
+    takenBy: candidate.takenBy ?? undefined,
+  };
+  const kept = Object.fromEntries(Object.entries(optional).filter(([, value]) => present(value)));
+
+  return {
+    id: candidate.id,
+    source: candidate.source,
+    kind: candidate.kind,
+    headline: candidate.headline,
+    scope: candidate.scope,
+    score: candidate.score,
+    ...(withClaim ? { fields: { claim: candidate.fields.claim } } : {}),
+    ...kept,
+  };
+}
+
+function fuseByScore<Row extends { id: string }>(
+  hybrid: Array<Hit<Row>>,
+  taskHits: Array<Hit<Row>>,
+  limit: number,
+): Array<Hit<Row>> {
+  const fused = new Map<string, Hit<Row>>();
+
+  for (const hit of hybrid) {
+    fused.set(hit.row.id, { row: hit.row, score: hit.score });
+  }
+
+  for (const hit of taskHits) {
+    const seen = fused.get(hit.row.id);
+
+    if (seen) {
+      seen.score += hit.score;
+    } else {
+      fused.set(hit.row.id, { row: hit.row, score: hit.score });
+    }
+  }
+
+  return [...fused.values()].sort((a, b) => b.score - a.score).slice(0, limit);
 }
 
 export function liveFilter(
@@ -121,6 +202,12 @@ function createReranker(jev: JevSettings): Reranker | null {
     timeoutMs: jev.timeoutMs,
     onError: (error) => console.error("jev rerank failed, using RRF order", error),
   });
+}
+
+function taskOf(raw: string | null | undefined): string | null {
+  const task = (raw ?? "").trim().slice(0, TASK_MAX_CHARS).trim();
+
+  return task === "" ? null : task;
 }
 
 export class RecallService {
@@ -157,9 +244,10 @@ export class RecallService {
     }
 
     const limit = this.limitOf(params.limit);
-    const candidates = await this.candidates(query, params, Math.max(limit, RERANK_POOL));
+    const task = taskOf(params.task);
+    const candidates = await this.candidates(query, task, params, Math.max(limit, RERANK_POOL));
     const ordered = await this.order(query, candidates);
-    const results = ordered.slice(0, limit);
+    const results = this.shape(ordered, limit);
 
     await this.log(query, params.scope ?? null, results);
 
@@ -178,18 +266,58 @@ export class RecallService {
     return Math.min(raw, MAX_LIMIT);
   }
 
-  private async candidates(query: string, params: RecallParams, perTable: number): Promise<RecallResult[]> {
+  private async candidates(
+    query: string,
+    task: string | null,
+    params: RecallParams,
+    perTable: number,
+  ): Promise<RecallCandidate[]> {
     const vector = await this.embedder.embed(query);
+    const taskVector = task === null ? null : await this.embedder.embed(task);
     const where = liveFilter(params.scope, params.kind, params.audience);
     const [v2, legacy] = await Promise.all([
-      hybridSearch<MemoryRecord>(this.store.records, { query, vector, where, limit: perTable }),
-      hybridSearch<LegacyRecord>(this.store.legacy, { query, vector, where, limit: perTable }),
+      this.searchTable<MemoryRecord>(this.store.records, { query, vector, where, limit: perTable }, taskVector),
+      this.searchTable<LegacyRecord>(this.store.legacy, { query, vector, where, limit: perTable }, taskVector),
     ]);
 
     return mergeBySource(v2, legacy);
   }
 
-  private async order(query: string, candidates: RecallResult[]): Promise<RecallResult[]> {
+  private async searchTable<Row extends StoredRecord>(
+    table: Store["records"] | Store["legacy"],
+    search: { query: string; vector: number[]; where: string; limit: number },
+    taskVector: number[] | null,
+  ): Promise<Array<Hit<Row>>> {
+    const hybrid = await hybridSearch<Row>(table, search);
+
+    if (taskVector === null) {
+      return hybrid;
+    }
+
+    const taskHits = await hybridSearch<Row>(table, { ...search, query: "-", vector: taskVector });
+
+    return fuseByScore(hybrid, taskHits, search.limit);
+  }
+
+  private shape(ordered: RecallCandidate[], limit: number): RecallResult[] {
+    const kept = ordered
+      .filter((candidate) => candidate.jevScored !== true || candidate.score >= SCORE_FLOOR)
+      .slice(0, limit);
+    let slots = CLAIM_SLOTS;
+
+    return kept.map((candidate) => {
+      const eligible = candidate.jevScored !== true || candidate.score >= CLAIM_LINE;
+      const withClaim = eligible && slots > 0;
+
+      if (withClaim) {
+        slots -= 1;
+      }
+
+      return shapeResult(candidate, withClaim);
+    });
+  }
+
+  private async order(query: string, candidates: RecallCandidate[]): Promise<RecallCandidate[]> {
     if (this.rerank === null) {
       return candidates;
     }
@@ -198,7 +326,7 @@ export class RecallService {
     const tail = candidates.slice(RERANK_POOL);
     const reranked = await this.rerank(query, head);
 
-    return [...(reranked ?? head), ...tail];
+    return reranked ?? [...head, ...tail];
   }
 
   private async log(query: string, scope: string | null, results: RecallResult[]): Promise<void> {

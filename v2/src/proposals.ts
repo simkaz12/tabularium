@@ -256,6 +256,32 @@ function parseFields(source: Record<string, unknown>, kind: Kind, target: Propos
   };
 }
 
+const SUPERSEDES_MAX = 5;
+
+function parseSupersedes(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new HttpError(400, "supersedes must be a list of record ids");
+  }
+
+  const ids = [...new Set(value.map((entry, index) => requireText(entry, `supersedes[${index}]`)))];
+
+  if (ids.length === 0 || ids.length > SUPERSEDES_MAX) {
+    throw new HttpError(400, `supersedes must hold 1 to ${SUPERSEDES_MAX} record ids`);
+  }
+
+  return ids;
+}
+
+function guardTarget(target: ProposalTarget | null, internal: boolean | undefined): void {
+  if (!internal && target !== null && target.action !== "close") {
+    throw new HttpError(400, "target.action must be close on this route");
+  }
+}
+
 export function parseProposalBody(raw: unknown, options: { internal?: boolean } = {}): ProposalBody {
   const body = asObject(raw, "body");
   const fields = asObject(body.fields, "fields");
@@ -263,6 +289,13 @@ export function parseProposalBody(raw: unknown, options: { internal?: boolean } 
   const origin = body.origin === undefined ? "agent" : oneOf<Origin>(body.origin, allowed, "origin");
   const kind = oneOf<Kind>(body.kind, KINDS, "kind");
   const target = parseTarget(body.target);
+  const supersedes = origin === "agent" ? parseSupersedes(body.supersedes) : undefined;
+
+  guardTarget(target, options.internal);
+
+  if (supersedes !== undefined && target?.action === "close") {
+    throw new HttpError(400, "supersedes cannot be combined with a close target");
+  }
 
   return {
     kind,
@@ -272,6 +305,7 @@ export function parseProposalBody(raw: unknown, options: { internal?: boolean } 
     provenance: parseProvenance(body.provenance),
     origin,
     target,
+    ...(supersedes === undefined ? {} : { supersedes }),
     audience: parseAudience(body.audience, "audience"),
   };
 }
@@ -477,6 +511,12 @@ export class ProposalService {
   }
 
   private async applyOnCreate(proposal: Proposal): Promise<Proposal> {
+    if (proposal.supersedes !== undefined) {
+      await this.assertSupersedable(proposal, proposal.supersedes);
+
+      return this.applySuperseding(proposal, { supersedes: proposal.supersedes, reason: "changed" });
+    }
+
     const suggestion = proposal.suggestion;
 
     if (suggestion?.action === "reinforce") {
@@ -496,9 +536,13 @@ export class ProposalService {
       return this.hold(flagged, target);
     }
 
-    const record = await this.apply(flagged, {});
+    return this.applySuperseding(flagged, {});
+  }
+
+  private async applySuperseding(proposal: Proposal, input: ApproveInput): Promise<Proposal> {
+    const record = await this.apply(proposal, input);
     const approved: Proposal = {
-      ...flagged,
+      ...proposal,
       status: "approved",
       resolvedAt: this.now(),
       resolution: { recordId: record.id, reason: null },
@@ -507,6 +551,32 @@ export class ProposalService {
     await upsert(this.store.proposals, [proposalToRow(approved)]);
 
     return approved;
+  }
+
+  private async assertSupersedable(proposal: Proposal, ids: string[]): Promise<void> {
+    for (const id of ids) {
+      if (id === proposal.id) {
+        throw new HttpError(400, `supersedes ${id} is the new note itself`);
+      }
+
+      const found = await this.records.locate(id);
+
+      if (found === undefined) {
+        throw new HttpError(404, `supersedes ${id} not found`);
+      }
+
+      if (found.row.lifecycle !== "live") {
+        throw new HttpError(409, `supersedes ${id} is ${found.row.lifecycle}, not live`);
+      }
+
+      if (found.row.kind === "defect") {
+        throw new HttpError(400, `supersedes ${id} is a defect; close it with closes`);
+      }
+
+      if (found.row.scope !== proposal.scope) {
+        throw new HttpError(400, `supersedes ${id} is in scope ${found.row.scope}, not ${proposal.scope}`);
+      }
+    }
   }
 
   private async coveringTarget(proposal: Proposal): Promise<AskTarget | null> {

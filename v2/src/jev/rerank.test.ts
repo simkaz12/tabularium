@@ -102,7 +102,7 @@ describe("jev rerank", () => {
 
     const { results } = await harness.services.recall.recall({ q: "repl readline", limit: 25 });
 
-    expect(results.length).toBe(25);
+    expect(results.length).toBe(20);
     expect(stub.calls.length).toBe(20);
   });
 

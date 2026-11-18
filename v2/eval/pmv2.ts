@@ -162,7 +162,7 @@ export async function recallArm(
         question_id: question.question_id,
         rank: index + 1,
         record_id: result.id,
-        text: `${result.headline}\n${result.fields.claim}`,
+        text: `${result.headline}\n${result.fields?.claim ?? ""}`,
       };
 
       appendJsonl(out, row);

@@ -4,7 +4,8 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { Cleaner, nextRunAfter, previousRunAtOrBefore, scheduleAt, scheduleWeekly } from "./cleaner.ts";
+import { CLEANER_SLOT, Cleaner, nextRunAfter, previousRunAtOrBefore, scheduleAt } from "./cleaner.ts";
+import type { ScheduleOptions } from "./cleaner.ts";
 import { loadConfig } from "./config.ts";
 import { start } from "./main.ts";
 import { insert, selectWhere } from "./store.ts";
@@ -814,19 +815,22 @@ describe("schedule", () => {
     expect(exactly.getDate()).toBe(8);
   });
 
-  it("runs once at the due time and re-arms for the following week", async () => {
+  const scheduleDailyCleaner = (run: () => Promise<unknown>, options: ScheduleOptions = {}) =>
+    scheduleAt(run, { ...CLEANER_SLOT, ...options });
+
+  it("runs at the next 03:00 and re-arms for each following day", async () => {
     vi.useFakeTimers({ now: new Date(2026, 9, 31, 12, 0, 0) });
     const run = vi.fn().mockResolvedValue(undefined);
 
-    const schedule = scheduleWeekly(run);
+    const schedule = scheduleDailyCleaner(run);
     await vi.advanceTimersByTimeAsync(24 * 3600 * 1000);
     expect(run).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(3 * 86_400_000);
-    expect(run).toHaveBeenCalledTimes(1);
-
-    await vi.advanceTimersByTimeAsync(5 * 86_400_000);
+    await vi.advanceTimersByTimeAsync(86_400_000);
     expect(run).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(3 * 86_400_000);
+    expect(run).toHaveBeenCalledTimes(5);
 
     schedule.stop();
   });
@@ -844,9 +848,9 @@ describe("schedule", () => {
   it("catches up a missed run within a minute of startup", async () => {
     vi.useFakeTimers({ now: new Date(2026, 10, 1, 3, 0, 30) });
     const run = vi.fn().mockResolvedValue(undefined);
-    const state = fakeState(new Date(2026, 9, 25, 3, 0, 5).toISOString());
+    const state = fakeState(new Date(2026, 9, 31, 3, 0, 5).toISOString());
 
-    const schedule = scheduleWeekly(run, { state });
+    const schedule = scheduleDailyCleaner(run, { state });
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(run).toHaveBeenCalledTimes(1);
@@ -860,7 +864,7 @@ describe("schedule", () => {
     const run = vi.fn().mockResolvedValue(undefined);
     const state = fakeState(new Date(2026, 10, 1, 3, 0, 5).toISOString());
 
-    const schedule = scheduleWeekly(run, { state });
+    const schedule = scheduleDailyCleaner(run, { state });
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(run).not.toHaveBeenCalled();
@@ -873,7 +877,7 @@ describe("schedule", () => {
     const run = vi.fn().mockResolvedValue(undefined);
     const state = fakeState(null);
 
-    const schedule = scheduleWeekly(run, { state });
+    const schedule = scheduleDailyCleaner(run, { state });
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(run).not.toHaveBeenCalled();
