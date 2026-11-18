@@ -1,104 +1,136 @@
 # Tabularium
 
-Long-term memory for LLM agents, built as an MCP server on a Python engine, with a second TypeScript server (v2) that took over the day-to-day writes.
+Long-term memory for AI coding agents. It decides what is worth remembering, refuses near-duplicates, hands each agent the right notes at session start, and cleans out stale ones.
 
-The thesis: memory is a harness concern, not a database. Hybrid vector and keyword search is the easy part. The parts that decide whether a memory is any good are what gets written, what gets refused, what gets surfaced to which agent, and what gets cleaned out later. Tabularium owns that whole path instead of leaving it to the caller.
+## Why
 
-## Status
+Storing and searching notes is the easy part. What decides whether a memory is any good is what gets saved, what gets refused, what each agent gets shown, and what gets cleaned up later. Tabularium owns that whole path instead of leaving it to the caller.
 
-This is a solo project that I use every day for my own coding agents. It is a public snapshot of a private repository, with the history squashed and the personal data removed. Nothing here is a product, and whether it beats having no memory layer at all is a hypothesis I am still testing on myself. No benchmark in this repo says otherwise.
+## How the parts connect
 
-The design documents under `docs/` ([`SPEC.md`](docs/SPEC.md) and [`docs/adr/`](docs/adr/)) are historical records of what I decided and why, written before and during the build. They diverge from the code in places. When they disagree, the code is right.
+```mermaid
+flowchart LR
+    agents["Coding agents<br/>(via the T3 Code fork)"]
+    v2["v2 HTTP server<br/>proposals, fold asks"]
+    jev["Jev checks"]
+    store[("v2 LanceDB store")]
+    cleaner["Daily cleaner<br/>daily defect sweep"]
+    tray["Tiles in the T3 Code tray<br/>(a human approves)"]
+    v1["v1 Python engine + MCP server<br/>(read-only archive)"]
 
-## What is in the repo
-
-| Path | What it is |
-| --- | --- |
-| `src/tabularium/` | The Python engine (v1), the MCP server and the CLI. About 34k lines. |
-| `v2/` | The TypeScript server (v2): an HTTP API with proposals, fold asks, a weekly cleaner and a daily defect sweep that queue tiles for a human, and a LanceDB store. See [`v2/README.md`](v2/README.md). |
-| `tests/` | The Python test suite, including a conformance suite that runs both storage adapters through one contract. |
-| `scripts/eval_v1v2/` | A bench that compares v1 and v2 on the same inputs. See [`scripts/eval_v1v2/README.md`](scripts/eval_v1v2/README.md). |
-| `deploy.sh`, `v2/deploy/` | Deploy scripts for a systemd host over ssh. |
-| `CONTEXT.md` | Glossary of the domain terms the code and ADRs use. |
+    agents -->|proposals| v2
+    v2 --- jev
+    v2 -->|writes| store
+    store -->|recall| agents
+    cleaner -->|reads| store
+    cleaner -->|queues tiles| tray
+    v1 -->|imported as legacy rows| store
+```
 
 ## How it works
 
 ### Records
 
-A record is a hypomnema, a durable note kept for later recall. A scope is a flat namespace per project. Reading in scope X sees X plus a reserved `global` scope.
+A record is a durable note kept for later recall. A scope is one namespace per project. Reading in a scope also sees a reserved `global` scope.
 
-There are three kinds of record:
+There are three kinds:
 
-- A Fact is knowledge that may be revised and decays out of use.
-- A Decision records what was chosen and why. In v1 the reason is part of the Decision's text. A v2 record has no `why` field: the thread excerpt in `provenance.excerpt` is the reason, and a v2 Decision names the option that was ruled out in `rejected`. Its content never changes. A change is a new Decision that supersedes the old one, and the old one stays queryable as history.
-- A Defect is a bug an agent saw and left alone. It records where the bug is, what triggers it, the symptom, and why it was left. It moves from `open` to `taken` (an agent is working on it) to `closed`. Closing it takes a proposal whose excerpt is the proof of the fix. A daily sweep sends stale takes back to `open`, and asks a human whether a defect open for 90 days is still real.
+- A fact is knowledge that may be revised and decays out of use.
+- A decision records what was chosen and what was ruled out. Its content never changes. A change is a new decision that supersedes the old one, and the old one stays queryable as history.
+- A defect is a bug an agent saw and left alone. It records where the bug is, what triggers it, the symptom, and why it was left. It moves from open to taken (an agent is working on it) to closed. Closing it takes a proposal whose excerpt is the proof of the fix. A daily sweep sends stale takes back to open.
 
-The v1 engine has only Facts and Decisions. Defects came with v2.
+The v1 engine has only facts and decisions. Defects came with v2.
 
-### Read side
+In v2, a record that is only history can be archived. Recall skips it, but it can still be read and restored.
 
-- `recall` (v1) runs a vector leg and a BM25 leg in parallel through the storage interface and fuses them with reciprocal rank fusion in the engine.
-- `context(scope, budget, role)` builds the payload an agent gets at session start. It fills two tiers, `hot` and then `ember`, filters by role and packs the result into a token budget. Hot is a small capped tier that is curated by hand. An ember is a transient nudge that fades if nothing references it.
-- `decisions_query` and the `decision://{id}` resource return Decisions with their supersession chain in a byte-stable render.
+### Recall and session context
 
-The MCP server exposes four tools (`recall`, `decision`, `decisions_query`, `context`) and the `decision://{id}` resource. It has no write tools, and its tools read the v1 store only. That store is now a read-only archive.
+In v1, recall runs a vector search and a keyword search (BM25) in parallel and merges the two ranked lists with reciprocal rank fusion. Session context is a separate call. It builds the payload an agent gets at session start by filling a small hand-curated hot tier first, then a tier of transient nudges that fade if nothing references them. It filters by the agent's role and packs the result into a token budget.
 
-### Write side and the dedup gate
+In v2, recall is hybrid search over the v2 records and the legacy rows imported from v1, reranked by [Jev](https://typesafe.ai). It filters by record kind and by audience. The caller passes a short line about its current work, which feeds one extra vector search. Rows under a score floor drop out, up to five rows above a score line carry their claim, and the rest come back as headlines only.
 
-`Tabularium.save` is the engine's write path. Before a record is written, the gate embeds it and probes the same scope for near neighbours. A neighbour at or above the cosine floor (0.80 for Facts, 0.70 for Decisions, both configurable) is a survivor. With an assessor configured, the assessor judges the pair. Without one, the save bounces. A bounce writes nothing. It returns the candidate and the exits the caller may take (reinforce the old record, confirm the two are distinct, supersede it).
+### The save gate
+
+Before a record is written, the gate embeds it and looks for near neighbours in the same scope. A neighbour at or above a cosine floor (0.80 for facts, 0.70 for decisions) is a survivor. In v1, an assessor judges the pair, or, with none configured, the save bounces. A bounce writes nothing. It returns the candidate and the exits the caller may take: reinforce the old record, confirm the two are distinct, or supersede it.
 
 Four plain string checks (numbers, versions, named entities, negation) catch pairs that cosine similarity treats as one but that differ in a way that matters, such as "50 per page" against "100 per page".
 
-When `TYPESAFE_API_KEY` is set, the assessor classifies the relation between the incoming record and its neighbour as restatement, replacement, follow-up or distinct. See [The assessor (Jev)](#the-assessor-jev) for the automatic exits and what happens when it is down.
+In v2, with fold asks on, a fact or decision with a close live neighbour is held as a fold ask instead of being written. A human answers fold, which writes a merged record and supersedes the old one, or keep both. If nobody answers before the ask expires, the original is written as submitted.
 
-The outcomes of a save are `saved`, `reinforced`, `revived`, `reconciled`, `bounced` and `already_saved`.
+### Jev checks
 
-### The assessor (Jev)
+v2 sends each proposal to Jev: one request about the record and two per neighbour, for the nearest three. It asks four kinds of question:
 
-Tabularium uses [Jev](https://typesafe.ai) from TypeSafe as its assessor. Both servers pin a versioned model id, `jev-1.13.0` by default (`TABULARIUM_ASSESSOR_MODEL`; v1 rejects aliases). Both read `TYPESAFE_API_KEY`. v1 posts to `https://api.typesafe.ai/v1/systemone` with `httpx`. v2 uses the `@typesafe-ai/sdk` client with retries off.
+- Gate questions: what kind of record it is, whether it is worth keeping, whether it is perishable, and who the reader is.
+- Labels: audience, breadth, scope, purpose and topic.
+- Shape checks: whether the headline matches the claim, whether the claim stands on its own, and whether the excerpt supports it.
+- Neighbour checks: whether the new record restates, replaces or follows up the old one, and whether it covers it.
 
-Jev sits behind a seam. In v1 it is the `Assessor` protocol in `engine/assessor.py`, which returns a verdict or a typed `Unavailable` (`absent`, `timeout` or `error`). Tests pass small in-test assessors (v2: a stub client), so no suite touches the network. Deadlines: 2 s on the v1 save path, 10 s in the v1 Cleaner, 15 s in v2 (`TABULARIUM_JEV_TIMEOUT_MS`).
+No flag blocks a save. A restatement suggests a reinforce, which applies at once. A replacement suggests a supersede, which waits on the proposal for the cleaner. An agent can also list up to five records its note replaces, and those are superseded at once. Without a key, or when a call times out or fails, proposals still apply with a `jev_unavailable` flag.
 
-In v1, the dedup gate asks for one relation per near neighbour. The four `TABULARIUM_AUTO_EXIT_*` flags are off by default. Each lets one label take its exit without a human, if a legal-exit check on kind, scope and reason class agrees. There is no confidence floor on this path. Verdicts are stored in the `assessor_verdicts` table. With no key, or when a call fails, the save bounces to the caller.
+### The cleaner
 
-In v2, each proposal gets one request about the record and two per neighbour, for the nearest three:
+The cleaner is a periodic pass over a scope that judges what the memory should stop holding. It has three axes:
 
-- Gate questions: `kind`, `worth`, `perishable` (not asked on a defect) and `reader`.
-- Labels: `audience`, `breadth`, `scope`, `purpose` and, when a topics file is present, `topic`.
-- Shape checks: `headline_faithful`, `claim_standing`, `excerpt_grounds`, and `rejected_names_alternative` on a decision that names a rejected option.
-- Neighbour checks: `relation` (with a reason class on a replacement), and the pair questions `newCoversOld` and `sameSubject`.
+- Relevance: records born since the last pass are graded against a rubric, and the ones not worth keeping are shelved. Shelved records leave recall but stay in the store.
+- Falsity: a newer record is compared with older ones it may have overtaken, and a contradicted fact gets a supersession edge.
+- Revisit: a rotation over old records, so a quiet scope still gets its old records looked at.
 
-An `unclear` answer, or a gate answer under confidence 0.5, only adds an `unclear:` or `low_confidence:` flag. A restatement suggests `reinforce`, which applies at once. A replacement suggests `supersede`, which waits on the proposal for the cleaner. No flag blocks a save; the cleaner reads them later.
+Two judges from different model families grade independently, and disagreements are handled by policy. The rubric is a TOML file hashed into a version that is stamped on every verdict. The pass advances its watermark only after it re-reads every write it made and finds it present.
 
-Jev also reranks v2 recall: it scores the top 20 hits, ten at a time. A failed score leaves that hit in place, and if every call fails the hybrid order stands. The cleaner asks it about duplicate and contradiction pairs and record relevance, up to 200 calls per run, and stops for the run after three consecutive outage errors.
+In v2, the cleaner runs daily and queues merge, supersede, retire and promote suggestions as tiles. A defect sweep runs daily and queues a close tile for each defect open for 90 days. A human approves or rejects each tile in the T3 Code tray.
 
-Without a key, v2 skips the checks and the rerank, and proposals still apply with the flag `jev_unavailable`. A timeout or error gives the same flag.
+### Storage and testing
 
-### Cleaner
+LanceDB is the production store, behind a storage port. An in-memory adapter implements the same port for tests, and one conformance suite runs against both.
 
-The Cleaner is a periodic pass over a scope that judges what the memory should stop holding. It has three axes:
+The default Python test lane is hermetic. Embeddings come from a frozen fixture of vectors built from a small synthetic corpus, so no test needs Ollama or a network. The same lane enforces recall and precision floors on that corpus and a precision floor on the gate's golden pairs. Those floors are regression gates, not quality claims about real data. The assessor sits behind a seam too, and the tests pass small stand-ins for it.
 
-- relevance: records born since the last pass are graded against a rubric and the ones not worth keeping are shelved. Shelved records leave recall but stay in the store.
-- falsity: a newer record is compared with older ones it may have overtaken, and a contradicted Fact gets a supersession edge.
-- revisit: a rotation over old records, with no watermark, so a quiet scope still gets its old records looked at.
+### v1 to v2
 
-Two judges from different model families grade independently, by default the `claude` and `codex` CLIs, with a litellm backstop (needs `DEEPSEEK_API_KEY`) when a seat is down. Disagreements are handled by policy. The rubric is a TOML file hashed into a version that is stamped on every verdict. The pass advances its watermark only after it re-reads every write it made and finds it present. It runs nightly when `TABULARIUM_ENABLE_CLEANER=true` (at 03:00 by default, set with `TABULARIUM_CLEANER_NIGHTLY_AT`), or by hand with `tabularium clean`.
+v1 is the Python engine with an MCP server. The server exposes four read tools and no write tools, and its store is now a read-only archive. v2 is a separate TypeScript server with its own store. It has no MCP surface. Agents reach it over plain HTTP from my fork of [T3 Code](https://github.com/pingdotgg/t3code), [simkaz12/t3code](https://github.com/simkaz12/t3code), through the memory tools and tray the fork adds. Records imported from v1 sit in a separate legacy table that v2 recall searches alongside its own records. Legacy rows never change through the API and drop out of recall once a v2 record replaces them.
 
-### Storage
+## Status
 
-LanceDB is the production store, behind a storage port. An in-memory adapter implements the same port for tests. One conformance suite runs against both.
+This is a solo project that I use every day for my own coding agents. It is a public snapshot of a private repository, with the history squashed and the personal data removed. It is an experiment, not a product. Whether it beats having no memory layer at all is a hypothesis I am still testing on myself. The results below do not settle it.
 
-### v2
+## Results
 
-v2 is a separate TypeScript server with its own LanceDB store. Agents reach it over plain HTTP, since it has no MCP surface; my fork of [T3 Code](https://github.com/pingdotgg/t3code), [simkaz12/t3code](https://github.com/simkaz12/t3code), calls it from the memory tools and tray the fork adds. Agents submit proposals (`POST /v2/proposals`) for any of the three kinds, and an agent proposal applies on create unless a fold ask holds it (below). Agents take and release defects directly, with no proposal. The assessor labels each proposal and flags the ones that look like junk or restatements.
+Two evals, each run once. Treat them as a snapshot, not a verdict.
 
-With fold asks on (`TABULARIUM_FOLD_ASK`, off in code and on in the shipped systemd unit), a fact or decision proposal with a close live neighbour in the same scope is not written at once. It is held as `asked` until a human answers `fold` (a merged record is written and the old one is superseded) or `keep_both`, or until the ask expires, when the original proposal is written as submitted.
+### PersonaMem-v2 (public benchmark)
 
-A cleaner runs weekly (Sunday 03:00 server time) and queues merge, supersede, retire and promote suggestions as tiles for a human to approve or reject. A defect sweep runs daily at 05:00 and queues a close tile for each defect that has been open 90 days. Records imported from a v1 store sit in a separate legacy table that recall searches alongside the v2 records; legacy rows never change through the API and drop out of recall once a v2 record replaces them. v2 recall is hybrid search over the v2 and legacy rows, reranked by Jev, with `kind` and `audience` filters. It is a different path from the v1 fusion described above. The route list and every status code are in [`v2/README.md`](v2/README.md).
+147 multiple-choice questions about 5 simulated users from [PersonaMem-v2](https://huggingface.co/datasets/bowen-upenn/PersonaMem-v2). Notes were extracted once from the chat histories, and v1 and v2 each stored the same 746 notes. For every question a reader model (Claude Opus) answered using only what that setup recalled.
+
+| Setup | All 147 | 62 "forget" questions | Other 85 |
+| --- | --- | --- | --- |
+| No memory | 40.1% | 0.0% | 69.4% |
+| v1 | 69.4% | 80.6% | 61.2% |
+| v2 (with rerank) | 70.1% | 79.0% | 63.5% |
+| Full chat history | 81.0% | 93.5% | 71.8% |
+
+- v1 and v2 score the same within noise. v2 minus v1 is +0.7 points, with a 95% interval of -5.4 to +6.8.
+- The whole gain over no memory comes from the 62 forget questions, where the user asked for something to be forgotten. On the other 85, both memory setups scored lower than no memory (61 to 64% against 69.4%). I did not test whether that gap is significant.
+- Full chat history is the ceiling: the reader sees everything. Between no memory (40.1%) and that ceiling (81.0%), v1 closed 72% of the gap and v2 closed 73%.
+
+The scripts are in [`scripts/eval_v1v2/pmv2/`](scripts/eval_v1v2/pmv2/). A rerun needs Ollama, the Claude CLI and a Jev key, and the model answers vary between runs.
+
+### Duplicate handling (my own data)
+
+202 pairs of an existing note and a new similar one, taken from my own store, where two LLM judges agreed on what should happen (Cohen's kappa 0.77). This ran on a build from before fold asks. The data is private, so it cannot be rerun from this repo.
+
+| | v1 | v2 |
+| --- | --- | --- |
+| Notes wrongly merged away | 0 of 202 | 0 of 202 |
+| False alarms: pairs that should both be kept, flagged anyway | 89 of 121 (74%) | 4 of 121 (3%) |
+| Repeats caught or flagged | 34 of 39 (87%) | 26 of 39 (67%) |
+| Replacements flagged | 41 of 42 (98%) | 36 of 42 (86%) |
+
+v2 interrupts the agent far less often but misses more repeats and replacements. 120 of the 242 candidate pairs came from v1's own bounce log, which pushes v1's flag rates up.
 
 ## Quick start
 
-You need Python 3.12 or newer, [uv](https://docs.astral.sh/uv/), and for real embeddings an [Ollama](https://ollama.com) server with `nomic-embed-text` on `localhost:11434`. The test suite does not need Ollama.
+You need Python 3.12 or newer, [uv](https://docs.astral.sh/uv/), and for real embeddings an [Ollama](https://ollama.com) server with `nomic-embed-text` on `localhost:11434`.
 
 ```bash
 uv sync
@@ -108,79 +140,25 @@ uv run tabularium doctor
 uv run tabularium-mcp
 ```
 
-`tabularium-mcp` serves over stdio unless `TABULARIUM_MCP_TRANSPORT=http` is set. With the HTTP transport it binds `TABULARIUM_MCP_HOST` and `TABULARIUM_MCP_PORT`.
+The v2 server has its own start commands in [`v2/README.md`](v2/README.md).
 
-To use the engine as a library:
+## Learn more
 
-```python
-import asyncio
-import tempfile
-
-from tabularium.clock import SystemClock
-from tabularium.config import EngineConfig
-from tabularium.embedding import LitellmEmbedder
-from tabularium.engine import Tabularium
-from tabularium.storage.lancedb_adapter import LanceDBAdapter
-
-
-async def main() -> None:
-    embedder = LitellmEmbedder()
-    clock = SystemClock()
-    adapter = await LanceDBAdapter.open(
-        tempfile.mkdtemp(), embedding_model=embedder.model, dim=embedder.dim, clock=clock
-    )
-    engine = Tabularium(adapter, embedder, clock, EngineConfig())
-    await engine.initialize()
-
-    await engine.save("The todo app syncs tasks to Postgres.", scope="global")
-    second = await engine.save("The todo app syncs its tasks to a Postgres database.", scope="global")
-    print(second.outcome)
-
-    result = await engine.recall("where do tasks sync to", scope="global", limit=3)
-    print([hit.content for hit in result.hits])
-
-
-asyncio.run(main())
-```
-
-With Ollama running, the second save is bounced as a near-duplicate of the first.
-
-The CLI has nine subcommands: `sync`, `scope`, `facet`, `role`, `reclaim`, `doctor`, `backfill`, `supersede` and `clean`.
+- [`docs/how-it-works.md`](docs/how-it-works.md): records, recall, the save gate, the cleaner, storage, the eval bench and deploy
+- [`v2/README.md`](v2/README.md): the TypeScript server, its configuration and API
+- [`scripts/eval_v1v2/README.md`](scripts/eval_v1v2/README.md): the bench that compares v1 and v2
+- [`docs/adr/`](docs/adr/): historical design records
+- [`CONTEXT.md`](CONTEXT.md): glossary of the domain terms
 
 ## Tests
 
 ```bash
 uv run pytest          # default lane, no network, no Ollama
-uv run pytest -m integration   # needs a live Ollama (and some tests an API key)
 uv run ruff check
 uv run mypy .
 
 cd v2 && npm ci && npm run typecheck && npm test
 ```
-
-The default Python lane is hermetic. Embeddings come from a frozen fixture of vectors (`tests/fixtures/frozen_vectors.json`) built from a small synthetic corpus. `scripts/freeze_vectors.py` regenerates it against a local Ollama. The same lane enforces recall and precision floors on that corpus and a precision floor on the dedup gate's golden pairs. Those floors are regression gates for this synthetic corpus, not quality claims about real data.
-
-## Eval bench
-
-`scripts/eval_v1v2/` replays labelled record pairs through the v1 gate and through v2's proposal path, and asks both engines the same questions, on throwaway stores. Real data is bring-your-own. The README there lists the inputs, the requirements and the run commands.
-
-## Deploy
-
-Both deploy scripts take their target from environment variables and fail with a usage message when one is missing. They assume a Linux host with systemd that you reach over ssh.
-
-```bash
-DEPLOY_HOST=user@host DEPLOY_DIR=tabularium DEPLOY_URL=http://host:8787/mcp ./deploy.sh
-DEPLOY_HOST=user@host DEPLOY_DIR=tabularium-v2 DEPLOY_HEALTH_URL=http://host:8789/v2/health v2/deploy/deploy.sh
-```
-
-`deploy.sh` pulls and syncs the Python checkout on the host, waits for the Cleaner's judge subprocesses to finish so a restart does not kill a pass half way, restarts the unit, and lists the tools the new process serves. `./deploy.sh --drain-only` runs only the wait. `v2/deploy/deploy.sh` syncs `v2/`, installs a systemd unit rendered from `v2/deploy/tabularium-v2.service`, restarts it and polls the health URL. Neither script ships a unit for the Python server, so create `tabularium-mcp.service` yourself or set `DEPLOY_UNIT`.
-
-The Python server has no authentication. v2 only checks the `Host` header against `TABULARIUM_ALLOWED_HOSTS`. Bind both to loopback or a private interface. The MCP HTTP transport defaults to `127.0.0.1:8787`.
-
-## Layout notes
-
-- Python 3.12, pydantic, LanceDB, litellm for embeddings and judge backstops, the official MCP Python SDK for the server. ruff, and mypy in strict mode.
-- v2 needs Node 22.18 or newer, the first 22.x that strips types without a flag. It runs TypeScript directly with no build step.
 
 ## Credits
 
