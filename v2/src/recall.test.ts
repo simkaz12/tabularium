@@ -5,6 +5,8 @@ import { makeHarness, seedLegacy, seedRecord, stubJev } from "./testing.ts";
 import type { Harness } from "./testing.ts";
 import type { JevRequest, ReadLogEntry } from "./domain.ts";
 import { DEFAULT_LIMIT, TASK_MAX_CHARS } from "./recall.ts";
+import { createScopeMapRef } from "./http.ts";
+import { ScopeMap } from "./scopeMap.ts";
 
 let harness: Harness;
 
@@ -51,6 +53,36 @@ describe("recall", () => {
     expect(log.map((entry) => entry.resultId).sort()).toEqual(results.map((entry) => entry.id).sort());
     expect(log.every((entry) => entry.query === "repl readline error")).toBe(true);
     expect(log.map((entry) => entry.source).sort()).toEqual(results.map((entry) => entry.source).sort());
+  });
+
+  it("logs the thread id, the task line and via on every recall row", async () => {
+    await seedRecord(harness, repl);
+    await seedLegacy(harness, repl);
+
+    const { results } = await harness.services.recall.recall({
+      q: "repl readline error",
+      scope: "project-a",
+      task: "  fixing repl  ",
+      threadId: "thread-7",
+    });
+
+    const log = await selectWhere<ReadLogEntry>(harness.store.readLog, undefined);
+    expect(log.length).toBe(results.length);
+    expect(log.length).toBeGreaterThan(0);
+    expect(log.every((entry) => entry.threadId === "thread-7")).toBe(true);
+    expect(log.every((entry) => entry.task === "fixing repl")).toBe(true);
+    expect(log.every((entry) => entry.via === "recall")).toBe(true);
+  });
+
+  it("logs null thread id and task when the caller sends neither", async () => {
+    await seedRecord(harness, repl);
+
+    await harness.services.recall.recall({ q: "repl readline error", scope: "project-a" });
+
+    const log = await selectWhere<ReadLogEntry>(harness.store.readLog, undefined);
+    expect(log.length).toBeGreaterThan(0);
+    expect(log.every((entry) => entry.threadId === null && entry.task === null)).toBe(true);
+    expect(log.every((entry) => entry.via === "recall")).toBe(true);
   });
 
   it("logs nothing when nothing is returned", async () => {
@@ -389,5 +421,58 @@ describe("recall floor, claim slots and log", () => {
 
     expect(results.length).toBe(1);
     expect(log.map((entry) => entry.resultId)).toEqual(results.map((entry) => entry.id));
+  });
+});
+
+describe("recall across profiles", () => {
+  const shared = { why: "w", headline: "repl readline crashes", claim: "repl aborts with a readline error" };
+
+  async function profiled() {
+    const map = new ScopeMap(["work", "personal"], new Map([["acme", "work"], ["notes", "personal"]]), []);
+    harness = await makeHarness({ scopeMap: createScopeMapRef(null, map) });
+
+    const rows = {
+      acme: await seedRecord(harness, { ...shared, scope: "acme" }),
+      work: await seedRecord(harness, { ...shared, scope: "global-work" }),
+      personal: await seedRecord(harness, { ...shared, scope: "global-personal" }),
+      global: await seedRecord(harness, { ...shared, scope: "global" }),
+    };
+
+    return rows;
+  }
+
+  it("returns the scope and its profile shared scope and nothing from other profiles", async () => {
+    const rows = await profiled();
+
+    const { results } = await harness.services.recall.recall({ q: "repl readline error", scope: "acme" });
+
+    expect(results.map((entry) => entry.id).sort()).toEqual([rows.acme.id, rows.work.id].sort());
+  });
+
+  it("never returns a global row for a recall in global-work", async () => {
+    const rows = await profiled();
+
+    const { results } = await harness.services.recall.recall({ q: "repl readline error", scope: "global-work" });
+
+    expect(results.map((entry) => entry.id)).toEqual([rows.work.id]);
+  });
+
+  it("gives an unmapped scope the default profile and its global scope", async () => {
+    const rows = await profiled();
+
+    const { results } = await harness.services.recall.recall({ q: "repl readline error", scope: "unmapped" });
+
+    expect(results.map((entry) => entry.id)).toEqual([rows.global.id]);
+  });
+
+  it("still returns the acme and global rows with an empty scope map", async () => {
+    harness = await makeHarness();
+    const acme = await seedRecord(harness, { ...shared, scope: "acme" });
+    const global = await seedRecord(harness, { ...shared, scope: "global" });
+    await seedRecord(harness, { ...shared, scope: "global-work" });
+
+    const { results } = await harness.services.recall.recall({ q: "repl readline error", scope: "acme" });
+
+    expect(results.map((entry) => entry.id).sort()).toEqual([acme.id, global.id].sort());
   });
 });

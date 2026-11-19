@@ -1,0 +1,16 @@
+[Unit]
+Description=TabuMCP memory server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={{HOME}}
+Environment=NODE_ENV=production
+Environment="PATH={{NODE_DIR}}:/usr/local/bin:/usr/bin:/bin"
+ExecStart="{{CURRENT_EXEC}}/node_modules/.bin/tabumcp" serve
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

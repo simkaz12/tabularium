@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -12,6 +12,7 @@ import { insert, selectWhere } from "./store.ts";
 import { choiceAnswer, makeHarness, proposalBody, seedLegacy, seedRecord, stubJev } from "./testing.ts";
 import type { Harness } from "./testing.ts";
 import type { ReadLogEntry } from "./domain.ts";
+import { ScopeMap } from "./scopeMap.ts";
 
 const NOW = new Date("2026-11-01T10:00:00.000Z");
 const daysAgo = (days: number) => new Date(NOW.getTime() - days * 86_400_000).toISOString();
@@ -275,6 +276,31 @@ describe("cleaner", () => {
     const report = await cleanerFor(h, null).run();
 
     expect(report.proposed.map((entry) => entry.target?.recordId)).toEqual([hot.id]);
+  });
+
+  it("does not count get rows toward promotion", async () => {
+    const h = await setup();
+    const hot = await seedLegacy(h, { headline: "popular repl note", claim: "repl readline", why: "fixtures" });
+    await insert(
+      h.store.readLog,
+      Array.from({ length: 3 }, (_, index) => ({
+        id: `g${index}`,
+        ts: daysAgo(1),
+        query: null,
+        scope: "project-a",
+        resultId: hot.id,
+        source: "legacy",
+        rank: null,
+        score: null,
+        threadId: "thread-1",
+        task: null,
+        via: "get",
+      })),
+    );
+
+    const report = await cleanerFor(h, null).run();
+
+    expect(report.proposed).toEqual([]);
   });
 
   it("does not propose promoting a legacy record already in v2", async () => {
@@ -1304,10 +1330,163 @@ describe("cleaner doubts pass", () => {
   });
 });
 
+describe("cleaner across profiles", () => {
+  const workMap = new ScopeMap(["work", "personal"], new Map([["acme", "work"]]), []);
+  const sharedScopeOf = (scope: string) => workMap.sharedScopeOf(scope);
+
+  async function seedAcrossShared(h: Harness, newerScope: string) {
+    const older = await seedRecord(h, {
+      scope: "acme",
+      createdAt: daysAgo(90),
+      vector: unit(0),
+      headline: "old port",
+      claim: "port 8787",
+      why: "a",
+    });
+    const newer = await seedRecord(h, {
+      scope: newerScope,
+      createdAt: daysAgo(40),
+      vector: unit(NEAR_DUPLICATE_ANGLE),
+      headline: "new port",
+      claim: "port 8789",
+      why: "b",
+    });
+
+    return { older, newer };
+  }
+
+  it("pairs a scoped record with a global one when no profile map is loaded", async () => {
+    const h = await setup();
+    const { older, newer } = await seedAcrossShared(h, "global");
+
+    const report = await cleanerFor(h, stubJev()).run();
+
+    expect(report.proposed.map((entry) => [entry.target?.recordId, entry.target?.replacementId])).toEqual([
+      [older.id, newer.id],
+    ]);
+  });
+
+  it("never pairs a work record with a personal or default shared record", async () => {
+    const h = await setup();
+    await seedAcrossShared(h, "global");
+    await seedRecord(h, {
+      scope: "global-personal",
+      createdAt: daysAgo(40),
+      vector: unit(NEAR_DUPLICATE_ANGLE),
+      headline: "personal port",
+      claim: "port 9000",
+      why: "c",
+    });
+
+    const report = await cleanerFor(h, stubJev(), { sharedScopeOf }).run();
+
+    expect(report.proposed.filter((entry) => entry.target?.action === "merge")).toEqual([]);
+  });
+
+  it("never pairs a global-work record with a global record", async () => {
+    const h = await setup();
+    await seedRecord(h, {
+      scope: "global-work",
+      createdAt: daysAgo(90),
+      vector: unit(0),
+      headline: "old work port",
+      claim: "port 8787",
+      why: "a",
+    });
+    await seedRecord(h, {
+      scope: "global",
+      createdAt: daysAgo(40),
+      vector: unit(NEAR_DUPLICATE_ANGLE),
+      headline: "new default port",
+      claim: "port 8789",
+      why: "b",
+    });
+
+    const report = await cleanerFor(h, stubJev(), { sharedScopeOf }).run();
+
+    expect(report.proposed.filter((entry) => entry.target?.action === "merge")).toEqual([]);
+  });
+
+  it("pairs a work record with the work shared scope", async () => {
+    const h = await setup();
+    const { older, newer } = await seedAcrossShared(h, "global-work");
+
+    const report = await cleanerFor(h, stubJev(), { sharedScopeOf }).run();
+
+    expect(report.proposed.map((entry) => [entry.target?.recordId, entry.target?.replacementId])).toEqual([
+      [older.id, newer.id],
+    ]);
+  });
+});
+
+describe.each(["t3", "standalone"] as const)("cleaner tiles in %s mode", (mode) => {
+  const applies = mode === "standalone";
+
+  async function setupMode() {
+    harness = await makeHarness({ proposals: { mode } });
+    harness.clock.value = NOW.toISOString();
+
+    return harness;
+  }
+
+  it(`${applies ? "applies" : "holds"} a supersede tile and unsupersede restores it`, async () => {
+    const h = await setupMode();
+    const { older, newer } = await seedPortPair(h, NEAR_DUPLICATE_ANGLE);
+    const stub = stubJev({ contradiction: () => choiceAnswer("changed", 0.9), relevance: keep });
+
+    const report = await cleanerFor(h, stub, { mode }).run();
+
+    expect(report.proposed.map((entry) => [entry.target?.action, entry.status])).toEqual([
+      ["supersede", applies ? "approved" : "pending"],
+    ]);
+    expect((await h.services.records.get(older.id)).lifecycle).toBe(applies ? "superseded" : "live");
+    expect((await h.services.records.get(newer.id)).lifecycle).toBe("live");
+
+    if (applies) {
+      const restored = await h.services.records.unsupersede(older.id, "wrong pairing");
+
+      expect(restored.lifecycle).toBe("live");
+      expect(restored.supersededBy).toBeNull();
+    }
+  });
+
+  it(`${applies ? "leaves both records live" : "makes a merge tile"} for a near-duplicate jev calls coexist`, async () => {
+    const h = await setupMode();
+    const { older, newer } = await seedPortPair(h, NEAR_DUPLICATE_ANGLE);
+    const stub = stubJev({ contradiction: () => choiceAnswer("coexist"), relevance: keep });
+
+    const report = await cleanerFor(h, stub, { mode }).run();
+
+    expect(report.proposed.map((entry) => entry.target?.action)).toEqual(applies ? [] : ["merge"]);
+    expect((await h.services.records.get(older.id)).lifecycle).toBe("live");
+    expect((await h.services.records.get(newer.id)).lifecycle).toBe("live");
+  });
+
+  it(`${applies ? "makes no merge tile" : "makes a merge tile"} for a near-duplicate with no jev answer`, async () => {
+    const h = await setupMode();
+    await seedPortPair(h, NEAR_DUPLICATE_ANGLE);
+
+    const report = await cleanerFor(h, null, { mode }).run();
+
+    expect(report.proposed.filter((entry) => entry.target?.action === "merge")).toHaveLength(applies ? 0 : 1);
+  });
+
+  it("merges a near-duplicate jev answered without coexist", async () => {
+    const h = await setupMode();
+    const { older } = await seedPortPair(h, NEAR_DUPLICATE_ANGLE);
+    const stub = stubJev({ contradiction: () => choiceAnswer("changed", 0.5), relevance: keep });
+
+    const report = await cleanerFor(h, stub, { mode }).run();
+
+    expect(report.proposed.map((entry) => entry.target?.action)).toEqual(["merge"]);
+    expect((await h.services.records.get(older.id)).lifecycle).toBe(applies ? "retired" : "live");
+  });
+});
+
 describe("main wiring", () => {
   it("records the last run at startup so catch-up is live", async () => {
     const dir = mkdtempSync(join(tmpdir(), "tabularium-main-"));
-    const config = { ...loadConfig({}), host: "127.0.0.1", port: 0, storePath: dir, embedDim: 64 };
+    const config = { ...loadConfig({ TABUMCP_MODE: "t3" }), host: "127.0.0.1", port: 0, storePath: dir, embedDim: 64 };
     const running = await start(config);
 
     try {
@@ -1326,5 +1505,40 @@ describe("main wiring", () => {
       await new Promise<void>((resolve) => running.server.close(() => resolve()));
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("does not schedule the cleaner in standalone mode without a key", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "tabularium-main-"));
+    const tokenFile = join(dir, "token");
+    writeFileSync(tokenFile, "tok");
+    const config = {
+      ...loadConfig({ TABUMCP_MODE: "standalone", TABUMCP_TOKEN_FILE: tokenFile }),
+      host: "127.0.0.1",
+      port: 0,
+      storePath: join(dir, "store"),
+      embedDim: 64,
+    };
+    const running = await start(config);
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      expect(await running.services.cleanerState.getLastRunAt()).toBeNull();
+    } finally {
+      running.defectSweepSchedule.stop();
+      await new Promise<void>((resolve) => running.server.close(() => resolve()));
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to start in standalone mode with no token file", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "tabularium-main-"));
+    const config = {
+      ...loadConfig({ TABUMCP_MODE: "standalone", TABUMCP_TOKEN_FILE: join(dir, "missing") }),
+      storePath: join(dir, "store"),
+    };
+
+    await expect(start(config)).rejects.toThrow(join(dir, "missing"));
+    rmSync(dir, { recursive: true, force: true });
   });
 });

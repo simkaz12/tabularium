@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createApprovedDefect, makeHarness, proposalBody, seedLegacy, seedRecord } from "./testing.ts";
+import type { DefectEvent } from "./domain.ts";
+import { selectWhere } from "./store.ts";
+import { createApprovedDefect, failNthWrite, makeHarness, proposalBody, seedLegacy, seedRecord } from "./testing.ts";
 import type { Harness } from "./testing.ts";
 
 let harness: Harness;
@@ -147,5 +149,94 @@ describe("retireLegacy replacement guard", () => {
       harness.services.proposals.reinforce(proposal.id, { recordId: legacy.id }),
     ).rejects.toMatchObject({ status: 409 });
     expect((await harness.services.records.get(legacy.id)).lifecycle).toBe("live");
+  });
+});
+
+describe("defect events", () => {
+  const taker = { threadId: "thread-9", link: "t3-thread://thread-9" };
+
+  async function events(): Promise<DefectEvent[]> {
+    return selectWhere<DefectEvent>(harness.store.defectEvents, undefined);
+  }
+
+  it("writes a take event with the taker thread id and link", async () => {
+    const defect = await createApprovedDefect(harness);
+
+    await harness.services.records.take(defect.id, taker);
+
+    expect(await events()).toEqual([
+      expect.objectContaining({
+        recordId: defect.id,
+        event: "take",
+        threadId: "thread-9",
+        link: "t3-thread://thread-9",
+        proposalId: null,
+      }),
+    ]);
+  });
+
+  it("writes a release event for the releasing thread", async () => {
+    const defect = await createApprovedDefect(harness);
+    await harness.services.records.take(defect.id, taker);
+
+    await harness.services.records.release(defect.id, { threadId: "thread-5" });
+
+    const released = (await events()).filter((event) => event.event === "release");
+    expect(released).toHaveLength(1);
+    expect(released[0]).toMatchObject({ recordId: defect.id, threadId: "thread-5" });
+  });
+
+  it("writes no event for a no-op release or a refused take", async () => {
+    const defect = await createApprovedDefect(harness);
+
+    await harness.services.records.release(defect.id, { threadId: "thread-5" });
+    await harness.services.records.take(defect.id, taker);
+    await expect(harness.services.records.take(defect.id, taker)).rejects.toMatchObject({ status: 409 });
+
+    expect((await events()).map((event) => event.event)).toEqual(["take"]);
+  });
+
+  it("keeps a call succeeding when the event insert fails and logs one stderr line", async () => {
+    const defect = await createApprovedDefect(harness);
+    const stderr = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const restore = failNthWrite(harness, "defectEvents", 1);
+
+    const taken = await harness.services.records.take(defect.id, taker);
+    restore();
+
+    expect(taken.defectStatus).toBe("taken");
+    expect(await events()).toEqual([]);
+    expect(stderr).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(stderr.mock.calls[0]?.[0]))).toMatchObject({ event: "defect-event-failed" });
+    stderr.mockRestore();
+  });
+
+  it("writes one close event with the proposal id and its provenance thread, and none on re-apply", async () => {
+    const defect = await createApprovedDefect(harness);
+    const tile = await harness.services.proposals.create(
+      proposalBody({
+        kind: "fact",
+        headline: "export now pages with a cursor",
+        fields: { claim: "the cursor fix landed with test SyncReportTest" },
+        target: { recordId: defect.id, source: "v2", action: "close" },
+      }),
+    );
+
+    const closed = (await events()).filter((event) => event.event === "close");
+    expect(closed).toHaveLength(1);
+    expect(closed[0]).toMatchObject({ recordId: defect.id, proposalId: tile.id, threadId: "thread-1" });
+
+    await (harness.services.proposals as any).applyClose(tile, tile.target);
+
+    expect((await events()).filter((event) => event.event === "close")).toHaveLength(1);
+  });
+
+  it("writes a get row only through read, not through take or release", async () => {
+    const defect = await createApprovedDefect(harness);
+
+    await harness.services.records.take(defect.id, taker);
+    await harness.services.records.release(defect.id);
+
+    expect(await harness.store.readLog.countRows()).toBe(0);
   });
 });

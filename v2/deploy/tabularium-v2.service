@@ -8,6 +8,7 @@ Type=simple
 User=@SERVICE_USER@
 WorkingDirectory=@DEPLOY_DIR@
 Environment=NODE_ENV=production
+Environment=TABUMCP_MODE=t3
 Environment=TABULARIUM_HOST=127.0.0.1
 Environment=TABULARIUM_PORT=8789
 Environment=TABULARIUM_STORE=/var/lib/tabularium-v2/store

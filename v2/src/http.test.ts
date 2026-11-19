@@ -1,4 +1,7 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -6,8 +9,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { EmbedError } from "./embed.ts";
 import type { Embedder } from "./embed.ts";
-import { createHttpServer, createServices } from "./http.ts";
-import { defectBody, makeHarness, proposalBody, seedLegacy, seedRecord } from "./testing.ts";
+import { createHttpServer, createScopeMapRef, createServices, readToken } from "./http.ts";
+import { ScopeMap } from "./scopeMap.ts";
+import { selectWhere } from "./store.ts";
+import type { DefectEvent, ReadLogEntry } from "./domain.ts";
+import { createApprovedDefect, defectBody, makeHarness, proposalBody, seedLegacy, seedRecord } from "./testing.ts";
 import type { Harness } from "./testing.ts";
 
 let harness: Harness;
@@ -378,4 +384,225 @@ describe("http", () => {
     expect(without.body.results.map((entry: { id: string }) => entry.id)).not.toContain(taskOnly.id);
     expect(withTask.body.results.map((entry: { id: string }) => entry.id)).toContain(taskOnly.id);
   });
+
+  it("logs the thread id from the recall query", async () => {
+    await seedRecord(harness, { headline: "repl readline", claim: "repl readline error" });
+
+    await call("GET", "/recall?q=repl%20readline&threadId=thread-5&task=fixing%20repl");
+
+    const log = await selectWhere<ReadLogEntry>(harness.store.readLog, undefined);
+    expect(log.length).toBeGreaterThan(0);
+    expect(log.every((entry) => entry.threadId === "thread-5" && entry.task === "fixing repl")).toBe(true);
+  });
+
+  it("writes exactly one get row for a found record and none for a 404", async () => {
+    const record = await seedRecord(harness, { headline: "repl readline", claim: "repl readline error" });
+
+    const found = await call("GET", `/records/${record.id}?threadId=thread-5`);
+    const missing = await call("GET", "/records/missing?threadId=thread-5");
+
+    const log = await selectWhere<ReadLogEntry>(harness.store.readLog, undefined);
+    expect(found.status).toBe(200);
+    expect(missing.status).toBe(404);
+    expect(log).toHaveLength(1);
+    expect(log[0]).toMatchObject({
+      resultId: record.id,
+      source: "v2",
+      threadId: "thread-5",
+      via: "get",
+      query: null,
+      task: null,
+      rank: null,
+      score: null,
+    });
+  });
+
+  it("logs a get with no thread id as null", async () => {
+    const record = await seedRecord(harness);
+
+    await call("GET", `/records/${record.id}`);
+
+    const log = await selectWhere<ReadLogEntry>(harness.store.readLog, undefined);
+    expect(log).toHaveLength(1);
+    expect(log[0]?.threadId).toBeNull();
+  });
+
+  it("writes release events with the body thread id, or null for a missing or non-string one", async () => {
+    const defect = await createApprovedDefect(harness);
+    const taker = { threadId: "thread-9", link: "t3-thread://thread-9" };
+
+    await call("POST", `/records/${defect.id}/take`, taker);
+    await call("POST", `/records/${defect.id}/release`, { threadId: "thread-5" });
+    await call("POST", `/records/${defect.id}/take`, taker);
+    await call("POST", `/records/${defect.id}/release`, {});
+    await call("POST", `/records/${defect.id}/take`, taker);
+    await call("POST", `/records/${defect.id}/release`, { threadId: 42 });
+
+    const events = await selectWhere<DefectEvent>(harness.store.defectEvents, "event = 'release'");
+    expect(events.map((event) => event.threadId).sort()).toEqual([null, null, "thread-5"]);
+  });
+
+  describe("profiles", () => {
+    const profileMap = new ScopeMap(["work", "personal"], new Map([["acme", "work"], ["notes", "personal"]]), []);
+
+    async function seedProfiles() {
+      harness.services.scopeMap.current = profileMap;
+
+      const rows = {
+        acme: await seedRecord(harness, { scope: "acme" }),
+        work: await seedRecord(harness, { scope: "global-work" }),
+        notes: await seedRecord(harness, { scope: "notes" }),
+        global: await seedRecord(harness, { scope: "global" }),
+        legacy: await seedLegacy(harness, { scope: "acme" }),
+      };
+
+      await harness.services.proposals.createInternal(proposalBody({ origin: "cleaner", scope: "acme" }));
+      await harness.services.proposals.createInternal(proposalBody({ origin: "cleaner", scope: "notes" }));
+
+      return rows;
+    }
+
+    it("counts the records and proposals across the profile scopes", async () => {
+      await seedProfiles();
+
+      const counted = await call("GET", "/profiles/work/count");
+
+      expect(counted.status).toBe(200);
+      expect(counted.body).toEqual({
+        profile: "work",
+        scopes: ["acme", "global-work"],
+        records: 3,
+        proposals: 1,
+      });
+    });
+
+    it("deletes only the profile rows and returns the counts the count route reported", async () => {
+      const rows = await seedProfiles();
+      const counted = await call("GET", "/profiles/work/count");
+
+      const deleted = await call("DELETE", "/profiles/work");
+
+      expect(deleted.status).toBe(200);
+      expect(deleted.body).toEqual(counted.body);
+
+      const left = await selectWhere<{ id: string }>(harness.store.records, undefined);
+      expect(left.map((row) => row.id).sort()).toEqual([rows.notes.id, rows.global.id].sort());
+      expect(await harness.store.legacy.countRows()).toBe(0);
+
+      const remaining = await selectWhere<{ scope: string }>(harness.store.proposals, undefined);
+      expect(remaining.map((row) => row.scope)).toEqual(["notes"]);
+    });
+
+    it("refuses the default profile and answers 404 to an unknown one", async () => {
+      await seedProfiles();
+
+      expect((await call("DELETE", "/profiles/default")).status).toBe(400);
+      expect((await call("GET", "/profiles/default/count")).status).toBe(400);
+      expect((await call("DELETE", "/profiles/nope")).status).toBe(404);
+      expect(await harness.store.records.countRows()).toBe(4);
+    });
+
+    it("reloads the scope map from its file and answers 400 to a bad file", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "tabularium-scopes-"));
+      const file = join(dir, "scopes.json");
+      writeFileSync(file, JSON.stringify({ profiles: ["work"], scopes: { acme: "work" } }));
+      harness.services.scopeMap = createScopeMapRef(file);
+
+      expect(harness.services.scopeMap.current.sharedScopeOf("acme")).toBe("global-work");
+
+      writeFileSync(file, JSON.stringify({ profiles: ["work"], scopes: { acme: "work", v2: "work" } }));
+      const reloaded = await call("POST", "/scope-map/reload");
+
+      expect(reloaded.body).toEqual({ profiles: ["work"] });
+      expect(harness.services.scopeMap.current.scopesOf("work")).toEqual(["acme", "v2", "global-work"]);
+
+      writeFileSync(file, "{");
+      const bad = await call("POST", "/scope-map/reload");
+
+      expect(bad.status).toBe(400);
+      expect(bad.body.error).toContain(file);
+      rmSync(dir, { recursive: true, force: true });
+    });
+  });
 });
+
+describe("http auth", () => {
+  const TOKEN = "s3cret-token-value";
+  let secured: Server;
+  let securedPort: number;
+
+  beforeEach(async () => {
+    secured = createHttpServer(harness.services, ["allowed.test:8789"], { token: TOKEN });
+    await new Promise<void>((resolve) => secured.listen(0, "127.0.0.1", resolve));
+    securedPort = (secured.address() as AddressInfo).port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => secured.close(() => resolve()));
+  });
+
+  function fetchStatus(path: string, headers: Record<string, string> = {}, port = securedPort) {
+    return new Promise<number>((resolve, reject) => {
+      const req = request(
+        `http://127.0.0.1:${port}/v2${path}`,
+        { method: "GET", headers: { host: "allowed.test:8789", ...headers } },
+        (res) => {
+          res.resume();
+          res.on("end", () => resolve(res.statusCode ?? 0));
+        },
+      );
+
+      req.on("error", reject);
+      req.end();
+    });
+  }
+
+  it("answers 401 with no token", async () => {
+    expect(await fetchStatus("/health")).toBe(401);
+  });
+
+  it("answers 401 to a wrong token, a wrong scheme and a prefix of the token", async () => {
+    expect(await fetchStatus("/health", { authorization: "Bearer nope" })).toBe(401);
+    expect(await fetchStatus("/health", { authorization: `Basic ${TOKEN}` })).toBe(401);
+    expect(await fetchStatus("/health", { authorization: `Bearer ${TOKEN.slice(0, 5)}` })).toBe(401);
+  });
+
+  it("answers 403 to the right token when an Origin header is present", async () => {
+    const headers = { authorization: `Bearer ${TOKEN}`, origin: "http://evil.example" };
+
+    expect(await fetchStatus("/health", headers)).toBe(403);
+  });
+
+  it("answers 403 to an Origin header even with no token", async () => {
+    expect(await fetchStatus("/health", { origin: "http://evil.example" })).toBe(403);
+  });
+
+  it("answers 200 to the right token with no Origin", async () => {
+    expect(await fetchStatus("/health", { authorization: `Bearer ${TOKEN}` })).toBe(200);
+  });
+
+  it("keeps the host allowlist in front of the token", async () => {
+    expect(await fetchStatus("/health", { authorization: `Bearer ${TOKEN}`, host: "evil.test" })).toBe(403);
+  });
+
+  it("answers 200 with no token and an Origin header in t3 mode", async () => {
+    const { port } = server.address() as AddressInfo;
+
+    expect(await fetchStatus("/health", { origin: "http://x.example" }, port)).toBe(200);
+  });
+
+  it("reads the token file trimmed and refuses a missing, empty or unset file with its path", () => {
+    const dir = mkdtempSync(join(tmpdir(), "tabularium-token-"));
+    const file = join(dir, "token");
+    const empty = join(dir, "empty");
+    writeFileSync(file, `${TOKEN}\n`);
+    writeFileSync(empty, "\n");
+
+    expect(readToken(file)).toBe(TOKEN);
+    expect(() => readToken(join(dir, "missing"))).toThrow(join(dir, "missing"));
+    expect(() => readToken(empty)).toThrow(empty);
+    expect(() => readToken(null)).toThrow("TABUMCP_TOKEN_FILE");
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+

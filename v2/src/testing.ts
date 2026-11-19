@@ -184,7 +184,7 @@ export async function seedLegacy(
   return legacy;
 }
 
-type WritableTable = "records" | "legacy" | "proposals" | "readLog";
+type WritableTable = "records" | "legacy" | "proposals" | "readLog" | "defectEvents";
 
 function guardBuilder(builder: any, trip: () => void): any {
   return new Proxy(builder, {

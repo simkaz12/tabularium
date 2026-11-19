@@ -1,0 +1,46 @@
+[
+  {
+    "name": "Architecture and design decisions",
+    "description": "Design choices, module boundaries, trade-offs and the reasons behind them."
+  },
+  {
+    "name": "Build, tooling and CI",
+    "description": "Build setup, compilers, linters, package scripts and continuous integration pipelines."
+  },
+  {
+    "name": "Testing",
+    "description": "Test strategy, fixtures, flaky tests and how behaviour is verified."
+  },
+  {
+    "name": "Bugs and gotchas",
+    "description": "Known defects, surprising behaviour, traps and their workarounds."
+  },
+  {
+    "name": "Deploy, infra and ops",
+    "description": "Deployment steps, hosting, environments, monitoring and runtime operations."
+  },
+  {
+    "name": "Data, schema and migrations",
+    "description": "Data models, database schema, migrations and storage behaviour."
+  },
+  {
+    "name": "Dependencies and third-party APIs",
+    "description": "Libraries, version constraints, vendor services and how their APIs behave."
+  },
+  {
+    "name": "Frontend and UI",
+    "description": "Interface code, components, styling, browser behaviour and user flows."
+  },
+  {
+    "name": "Security and auth",
+    "description": "Authentication, authorization, secrets handling and hardening."
+  },
+  {
+    "name": "Product requirements",
+    "description": "What the product must do, owner rulings on scope and acceptance criteria."
+  },
+  {
+    "name": "Workflow and team process",
+    "description": "How work is planned, reviewed, branched and handed off."
+  }
+]

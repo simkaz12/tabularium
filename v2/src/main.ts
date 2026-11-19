@@ -10,7 +10,8 @@ import { sweepDefects } from "./defectSweep.ts";
 import type { JevClient } from "./domain.ts";
 import { OllamaEmbedder } from "./embed.ts";
 import { checkEmbedderBuild } from "./embedderBuild.ts";
-import { createHttpServer, createServices } from "./http.ts";
+import { createHttpServer, createScopeMapRef, createServices, readToken } from "./http.ts";
+import { withAuthWarning } from "./jev/authWarning.ts";
 import { keyedRunClock } from "./settings.ts";
 import { openStore } from "./store.ts";
 
@@ -22,13 +23,17 @@ export function createJevClient(config: Config): JevClient | null {
     return null;
   }
 
-  return new TypeSafeClient({
+  const client = new TypeSafeClient({
     apiKey: config.typesafeApiKey,
     retry: { maxRetries: 0 },
   }) as unknown as JevClient;
+
+  return withAuthWarning(client);
 }
 
 export async function start(config: Config = loadConfig()) {
+  const token = config.mode === "standalone" ? readToken(config.tokenFile) : null;
+
   mkdirSync(config.storePath, { recursive: true });
 
   const store = await openStore(config.storePath, config.embedDim);
@@ -40,7 +45,10 @@ export async function start(config: Config = loadConfig()) {
     config.embedTimeoutMs,
   );
   const jev = createJevClient(config);
+  const scopeMap = createScopeMapRef(config.scopesFile);
+  const sharedScopeOf = (scope: string) => scopeMap.current.sharedScopeOf(scope);
   const services = createServices(store, embedder, {
+    scopeMap,
     proposals: {
       jev,
       model: config.assessorModel,
@@ -49,36 +57,40 @@ export async function start(config: Config = loadConfig()) {
       containment: config.containment,
       containmentFloor: config.containmentFloor,
       foldAsk: config.foldAsk,
+      mode: config.mode,
       foldSimilarityFloor: config.foldSimilarityFloor,
       foldSubjectFloor: config.foldSubjectFloor,
       foldAskTimeoutMs: config.foldAskTimeoutMs,
     },
   });
-  const server = createHttpServer(services, config.allowedHosts);
+  const server = createHttpServer(services, config.allowedHosts, { token, mcp: config.mode === "standalone" });
   const cleaner = new Cleaner({
     store,
     proposals: services.proposals,
     jev,
     model: config.assessorModel,
     timeoutMs: config.jevTimeoutMs,
+    sharedScopeOf,
+    mode: config.mode,
     settings: services.settings,
     state: services.cleanerState,
   });
-  const schedule = scheduleAt(
-    async () => {
-      const report = await cleaner.run();
+  const cleanerEnabled = config.mode === "t3" || jev !== null;
+  const runCleaner = async () => {
+    const report = await cleaner.run();
 
-      console.log(
-        JSON.stringify({
-          event: "cleaner-run",
-          proposed: report.proposed.length,
-          candidates: report.candidates,
-          jevCalls: report.jevCalls,
-        }),
-      );
-    },
-    { ...CLEANER_SLOT, state: services.cleanerState },
-  );
+    console.log(
+      JSON.stringify({
+        event: "cleaner-run",
+        proposed: report.proposed.length,
+        candidates: report.candidates,
+        jevCalls: report.jevCalls,
+      }),
+    );
+  };
+  const schedule = cleanerEnabled
+    ? scheduleAt(runCleaner, { ...CLEANER_SLOT, state: services.cleanerState })
+    : { stop: () => undefined };
 
   const defectSweepSchedule = scheduleAt(
     async () => {
@@ -86,6 +98,7 @@ export async function start(config: Config = loadConfig()) {
         store,
         records: services.records,
         proposals: services.proposals,
+        mode: config.mode,
       });
 
       console.log(
@@ -134,13 +147,14 @@ export async function start(config: Config = loadConfig()) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const { server, schedule, defectSweepSchedule, asksTimer } = await start();
+  const { server, schedule, defectSweepSchedule, asksTimer, services } = await start();
 
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, () => {
       schedule.stop();
       defectSweepSchedule.stop();
       clearInterval(asksTimer);
+      services.embedderHealth.stop();
       server.close(() => process.exit(0));
     });
   }

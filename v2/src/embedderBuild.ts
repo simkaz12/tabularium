@@ -100,20 +100,60 @@ export async function checkEmbedderBuild(
   return differs.length === 0 ? { status: "match", stamp } : { status: "mismatch", differs, stamp, current };
 }
 
+export const EMBEDDER_RETRY_MS = 30_000;
+
 export class EmbedderHealth {
   private check: EmbedderCheck = { status: "unchecked" };
+  private timer: NodeJS.Timeout | null = null;
+  private generation = 0;
 
   get(): EmbedderCheck {
     return this.check;
   }
 
-  async refresh(run: () => Promise<EmbedderCheck>): Promise<EmbedderCheck> {
-    this.check = await run();
+  async refresh(run: () => Promise<EmbedderCheck>, retryMs: number = EMBEDDER_RETRY_MS): Promise<EmbedderCheck> {
+    const wasUnreachable = this.check.status === "unreachable";
 
-    if (this.check.status !== "match" && this.check.status !== "unchecked") {
+    this.clearTimer();
+    this.generation += 1;
+
+    const generation = this.generation;
+    const result = await run();
+
+    if (generation !== this.generation) {
+      return this.check;
+    }
+
+    this.check = result;
+
+    const stillUnreachable = wasUnreachable && this.check.status === "unreachable";
+
+    if (this.check.status !== "match" && this.check.status !== "unchecked" && !stillUnreachable) {
       console.warn(JSON.stringify({ event: "embedder-build-warning", ...this.check }));
     }
 
+    if (this.check.status === "unreachable") {
+      this.timer = setTimeout(() => this.retry(run, retryMs), retryMs);
+      this.timer.unref();
+    }
+
     return this.check;
+  }
+
+  stop(): void {
+    this.generation += 1;
+    this.clearTimer();
+  }
+
+  private clearTimer(): void {
+    if (this.timer !== null) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+  }
+
+  private retry(run: () => Promise<EmbedderCheck>, retryMs: number): void {
+    this.timer = null;
+    this.refresh(run, retryMs).catch((error) => console.error(error));
   }
 }

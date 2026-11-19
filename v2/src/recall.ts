@@ -35,6 +35,7 @@ export interface RecallParams {
   audience?: string | null;
   limit?: number | null;
   task?: string | null;
+  threadId?: string | null;
 }
 
 export interface RecallCandidate {
@@ -182,10 +183,11 @@ export function liveFilter(
   scope: string | null | undefined,
   kind: string | null | undefined,
   audience: string | null | undefined,
+  shared = "global",
 ): string {
   return andAll([
     "lifecycle = 'live'",
-    scopeClause(scope),
+    scopeClause(scope, shared),
     kind ? `kind = ${sqlString(kind)}` : null,
     audience ? `(audience = ${sqlString(audience)} OR audience IS NULL)` : null,
   ]) as string;
@@ -215,13 +217,16 @@ export class RecallService {
   private readonly embedder: Embedder;
   private readonly rerank: Reranker | null;
   private readonly now: () => string;
+  private readonly sharedScopeOf: (scope: string) => string;
 
   constructor(
     store: Store,
     embedder: Embedder,
     jev: JevSettings = {},
     now: () => string = () => new Date().toISOString(),
+    sharedScopeOf: (scope: string) => string = () => "global",
   ) {
+    this.sharedScopeOf = sharedScopeOf;
     this.store = store;
     this.embedder = embedder;
     this.rerank = createReranker(jev);
@@ -249,7 +254,7 @@ export class RecallService {
     const ordered = await this.order(query, candidates);
     const results = this.shape(ordered, limit);
 
-    await this.log(query, params.scope ?? null, results);
+    await this.log(query, params.scope ?? null, results, task, params.threadId ?? null);
 
     return { results };
   }
@@ -274,7 +279,8 @@ export class RecallService {
   ): Promise<RecallCandidate[]> {
     const vector = await this.embedder.embed(query);
     const taskVector = task === null ? null : await this.embedder.embed(task);
-    const where = liveFilter(params.scope, params.kind, params.audience);
+    const shared = params.scope ? this.sharedScopeOf(params.scope) : "global";
+    const where = liveFilter(params.scope, params.kind, params.audience, shared);
     const [v2, legacy] = await Promise.all([
       this.searchTable<MemoryRecord>(this.store.records, { query, vector, where, limit: perTable }, taskVector),
       this.searchTable<LegacyRecord>(this.store.legacy, { query, vector, where, limit: perTable }, taskVector),
@@ -329,7 +335,13 @@ export class RecallService {
     return reranked ?? [...head, ...tail];
   }
 
-  private async log(query: string, scope: string | null, results: RecallResult[]): Promise<void> {
+  private async log(
+    query: string,
+    scope: string | null,
+    results: RecallResult[],
+    task: string | null,
+    threadId: string | null,
+  ): Promise<void> {
     const ts = this.now();
     const rows: ReadLogEntry[] = results.map((result, index) => ({
       id: randomUUID(),
@@ -340,6 +352,9 @@ export class RecallService {
       source: result.source,
       rank: index,
       score: result.score,
+      threadId,
+      task,
+      via: "recall",
     }));
 
     await insert(this.store.readLog, rows as unknown as Array<Record<string, unknown>>);
