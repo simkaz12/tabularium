@@ -1,0 +1,47 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.simkaz12/tabumcp",
+  "title": "TabuMCP",
+  "description": "Local long-term memory server for coding agents, with scoped recall and work/personal profiles.",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/simkaz12/tabularium",
+    "source": "github",
+    "subfolder": "v2"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "tabumcp",
+      "version": "0.1.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "streamable-http",
+        "url": "http://127.0.0.1:8789/mcp",
+        "headers": [
+          {
+            "name": "Authorization",
+            "description": "Bearer token from ~/.config/tabumcp/token, written by `npx tabumcp install`.",
+            "value": "Bearer {token}",
+            "isRequired": true,
+            "isSecret": true,
+            "variables": {
+              "token": {
+                "description": "Contents of the token file.",
+                "isRequired": true,
+                "isSecret": true
+              }
+            }
+          }
+        ]
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "serve"
+        }
+      ]
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 import { hostname } from "node:os";
 
+import type { Mode } from "./config.ts";
 import { DEFECT_ASK_CAP, DEFECT_STALE_DAYS, DEFECT_TAKEN_DAYS } from "./config.ts";
 import { HEADLINE_MAX } from "./domain.ts";
 import type { MemoryRecord } from "./domain.ts";
@@ -15,6 +16,7 @@ export interface DefectSweepOptions {
   store: Store;
   records: Pick<RecordService, "release">;
   proposals: Pick<ProposalService, "createInternal">;
+  mode?: Mode;
   now?: () => Date;
   log?: (message: string) => void;
 }
@@ -28,7 +30,7 @@ export async function sweepDefects(options: DefectSweepOptions): Promise<DefectS
   const now = options.now ?? (() => new Date());
   const log = options.log ?? ((message) => console.error(message));
   const released = await releaseStaleTakes(options, now(), log);
-  const asked = await askAboutStaleOpen(options, now(), released, log);
+  const asked = options.mode === "standalone" ? 0 : await askAboutStaleOpen(options, now(), released, log);
 
   return { released: released.size, asked };
 }
@@ -53,7 +55,7 @@ async function releaseStaleTakes(
 
   for (const { id } of stale) {
     try {
-      await options.records.release(id);
+      await options.records.release(id, { sweep: true });
       released.add(id);
     } catch (error) {
       log(`defect-sweep: releasing ${id} failed: ${String(error)}`);

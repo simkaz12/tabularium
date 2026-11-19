@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { findById, proposalToRow, selectWhere, upsert } from "./store.ts";
+import { createScopeMapRef } from "./http.ts";
 import { parseProposalBody } from "./proposals.ts";
+import { ScopeMap } from "./scopeMap.ts";
 import {
   choiceAnswer,
   createApprovedDefect,
@@ -1660,5 +1662,170 @@ describe("covers routing on propose", () => {
     } finally {
       h.cleanup();
     }
+  });
+});
+
+function scopeCriteria(stub: ReturnType<typeof stubJev>): string[] {
+  const question = stub.calls[0]?.questions.scope as { criteria?: Record<string, string> } | undefined;
+
+  return Object.keys(question?.criteria ?? {});
+}
+
+describe("propose across profiles", () => {
+  const workMap = () => createScopeMapRef(null, new ScopeMap(["work"], new Map([["acme", "work"]]), []));
+
+  it("labels the scope question with the declared scope and its profile shared scope", async () => {
+    const stub = stubJev();
+    const h = await makeHarness({
+      scopeMap: workMap(),
+      proposals: { jev: stub, model: "jev-test" },
+    });
+
+    try {
+      await h.services.proposals.create(proposalBody({ scope: "acme" }));
+
+      const criteria = scopeCriteria(stub);
+
+      expect(criteria).toContain("acme");
+      expect(criteria).toContain("global-work");
+      expect(criteria).not.toContain("global");
+    } finally {
+      h.cleanup();
+    }
+  });
+
+  it("labels an unmapped scope with global", async () => {
+    const stub = stubJev();
+    const h = await makeHarness({ proposals: { jev: stub, model: "jev-test" } });
+
+    try {
+      await h.services.proposals.create(proposalBody({ scope: "acme" }));
+
+      const criteria = scopeCriteria(stub);
+
+      expect(criteria).toContain("global");
+      expect(criteria).not.toContain("global-work");
+    } finally {
+      h.cleanup();
+    }
+  });
+
+  it("sends Jev only the scope labels of the declared profile", async () => {
+    const stub = stubJev();
+    const scopeMap = createScopeMapRef(
+      null,
+      new ScopeMap(["work", "home"], new Map([["acme", "work"], ["wiki", "work"], ["diary", "home"]]), []),
+    );
+    const h = await makeHarness({ scopeMap, proposals: { jev: stub, model: "jev-test" } });
+
+    try {
+      for (const scope of ["wiki", "diary", "global-home", "global-work", "global", "loose"]) {
+        await seedRecord(h, { scope });
+      }
+
+      await h.services.proposals.create(proposalBody({ scope: "acme" }));
+
+      expect(scopeCriteria(stub).sort()).toEqual(["acme", "global-work", "unclear", "wiki"]);
+    } finally {
+      h.cleanup();
+    }
+  });
+
+  it("sends every stored scope label when the map is empty", async () => {
+    const stub = stubJev();
+    const h = await makeHarness({ proposals: { jev: stub, model: "jev-test" } });
+
+    try {
+      for (const scope of ["wiki", "diary", "global"]) {
+        await seedRecord(h, { scope });
+      }
+
+      await h.services.proposals.create(proposalBody({ scope: "acme" }));
+
+      expect(scopeCriteria(stub).sort()).toEqual(["acme", "diary", "global", "unclear", "wiki"]);
+    } finally {
+      h.cleanup();
+    }
+  });
+
+  it("finds neighbours in the profile shared scope and not in global", async () => {
+    const stub = stubJev();
+    const h = await makeHarness({
+      scopeMap: workMap(),
+      proposals: { jev: stub, model: "jev-test" },
+    });
+
+    try {
+      const text = { headline: "repl readline crashes", claim: "repl aborts with a readline error", why: "w" };
+      const work = await seedRecord(h, { ...text, scope: "global-work" });
+      await seedRecord(h, { ...text, scope: "global" });
+
+      const proposal = await h.services.proposals.create(proposalBody({ scope: "acme" }));
+
+      expect(proposal.neighbours.map((neighbour) => neighbour.id)).toEqual([work.id]);
+    } finally {
+      h.cleanup();
+    }
+  });
+});
+
+describe.each(["t3", "standalone"] as const)("tile approval in %s mode", (mode) => {
+  const applies = mode === "standalone";
+  let h: Harness;
+
+  beforeEach(async () => {
+    h = await makeHarness({ proposals: { mode } });
+  });
+
+  afterEach(() => {
+    h.cleanup();
+  });
+
+  it(`${applies ? "applies" : "holds"} a cleaner supersede tile`, async () => {
+    const older = await seedRecord(h);
+    const newer = await seedRecord(h);
+
+    const tile = await h.services.proposals.createInternal(
+      proposalBody({
+        origin: "cleaner",
+        target: { recordId: older.id, source: "v2", action: "supersede", replacementId: newer.id, reason: "changed" },
+      }),
+    );
+
+    expect(tile.status).toBe(applies ? "approved" : "pending");
+    expect((await h.services.records.get(older.id)).lifecycle).toBe(applies ? "superseded" : "live");
+  });
+
+  it(`${applies ? "applies" : "holds"} a cleaner retire tile`, async () => {
+    const stale = await seedRecord(h);
+
+    const tile = await h.services.proposals.createInternal(
+      proposalBody({
+        origin: "cleaner",
+        target: { recordId: stale.id, source: "v2", action: "retire", reason: "stale" },
+      }),
+    );
+
+    expect(tile.status).toBe(applies ? "approved" : "pending");
+    expect((await h.services.records.get(stale.id)).lifecycle).toBe(applies ? "retired" : "live");
+  });
+
+  it(`${applies ? "applies" : "holds"} a promotion tile`, async () => {
+    const legacy = await seedLegacy(h, { purpose: "pitfall", topic: "tooling" });
+
+    const tile = await h.services.proposals.createInternal(
+      proposalBody({
+        origin: "promotion",
+        headline: legacy.headline,
+        target: { recordId: legacy.id, source: "legacy", action: "promote", reason: "returned 3 times" },
+      }),
+    );
+
+    expect(tile.status).toBe(applies ? "approved" : "pending");
+    expect(await h.store.records.countRows()).toBe(applies ? 1 : 0);
+  });
+
+  it("applies an agent proposal on create", async () => {
+    expect((await h.services.proposals.create(proposalBody())).status).toBe("approved");
   });
 });

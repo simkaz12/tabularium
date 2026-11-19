@@ -10,6 +10,7 @@ export interface Store {
   readonly legacy: Table;
   readonly proposals: Table;
   readonly readLog: Table;
+  readonly defectEvents: Table;
   readonly settings: Table;
   readonly cleanerState: Table;
   withLock<T>(work: () => Promise<T>): Promise<T>;
@@ -125,6 +126,19 @@ const READ_LOG_FIELDS: Field[] = [
   text("source"),
   int("rank"),
   new Field("score", new Float64(), true),
+  text("threadId"),
+  text("task"),
+  text("via"),
+];
+
+const DEFECT_EVENT_FIELDS: Field[] = [
+  text("id", false),
+  text("ts"),
+  text("recordId"),
+  text("event"),
+  text("threadId"),
+  text("link"),
+  text("proposalId"),
 ];
 
 const SETTINGS_FIELDS: Field[] = [
@@ -209,6 +223,7 @@ export async function openStore(path: string, dim: number): Promise<Store> {
   const legacy = await openOrCreate(db, "legacy", legacyFields(dim));
   const proposals = await openOrCreate(db, "proposals", PROPOSAL_FIELDS);
   const readLog = await openOrCreate(db, "read_log", READ_LOG_FIELDS);
+  const defectEvents = await openOrCreate(db, "defect_events", DEFECT_EVENT_FIELDS);
   const settings = await openOrCreate(db, "settings", SETTINGS_FIELDS);
   const cleanerState = await openOrCreate(db, "cleaner_state", CLEANER_STATE_FIELDS);
 
@@ -229,6 +244,7 @@ export async function openStore(path: string, dim: number): Promise<Store> {
     legacy,
     proposals,
     readLog,
+    defectEvents,
     settings,
     cleanerState,
     withLock: (work) => mutex.run(work),
@@ -239,12 +255,12 @@ export function sqlString(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
-export function scopeClause(scope: string | undefined | null): string | null {
+export function scopeClause(scope: string | undefined | null, shared = "global"): string | null {
   if (!scope) {
     return null;
   }
 
-  return `(scope = ${sqlString(scope)} OR scope = 'global')`;
+  return `(scope = ${sqlString(scope)} OR scope = ${sqlString(shared)})`;
 }
 
 export function andAll(clauses: Array<string | null | undefined>): string | undefined {

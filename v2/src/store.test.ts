@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import * as lancedb from "@lancedb/lancedb";
 
-import { hybridSearch, insert, openStore, sqlString } from "./store.ts";
+import { hybridSearch, insert, openStore, scopeClause, sqlString } from "./store.ts";
 import { makeHarness, seedRecord } from "./testing.ts";
 
 const dirs: string[] = [];
@@ -55,6 +55,13 @@ describe("store", () => {
     expect(await reader.readLog.countRows()).toBe(1);
   });
 
+  it("builds the scope clause around the given shared scope and defaults it to global", () => {
+    expect(scopeClause("acme")).toBe("(scope = 'acme' OR scope = 'global')");
+    expect(scopeClause("acme", "global-work")).toBe("(scope = 'acme' OR scope = 'global-work')");
+    expect(scopeClause("o'k", "global-w'k")).toBe("(scope = 'o''k' OR scope = 'global-w''k')");
+    expect(scopeClause(null, "global-work")).toBeNull();
+  });
+
   it("quotes single quotes in sql strings", () => {
     expect(sqlString("it's")).toBe("'it''s'");
   });
@@ -68,12 +75,14 @@ describe("store", () => {
     const db = await lancedb.connect(path);
     await db.dropTable("settings");
     await db.dropTable("cleaner_state");
+    await db.dropTable("defect_events");
     expect((await db.tableNames()).sort()).toEqual(["legacy", "proposals", "read_log", "records"]);
 
     const reopened = await openStore(path, 8);
 
     expect((await db.tableNames()).sort()).toEqual([
       "cleaner_state",
+      "defect_events",
       "legacy",
       "proposals",
       "read_log",

@@ -53,7 +53,8 @@ export interface CheckerOptions {
   model: string;
   topics: readonly TopicEntry[];
   timeoutMs?: number;
-  scopeLabels: () => Promise<Array<[string, string | null]>>;
+  scopeLabels: (scope: string) => Promise<Array<[string, string | null]>>;
+  sharedScopeOf?: (scope: string) => string;
 }
 
 export interface ChoiceAnswer {
@@ -385,7 +386,8 @@ export class ProposalChecker {
   }
 
   private async recordSpecs(body: ProposalBody): Promise<QuestionSpec[]> {
-    const labels = await this.options.scopeLabels();
+    const labels = await this.options.scopeLabels(body.scope);
+    const shared = this.options.sharedScopeOf?.(body.scope) ?? "global";
     const specs = [KIND_QUESTION, WORTH_QUESTION];
 
     if (body.kind !== "defect") {
@@ -394,7 +396,7 @@ export class ProposalChecker {
 
     specs.push(
       BREADTH_QUESTION,
-      scopeQuestion(withDeclared(labels, body.scope)),
+      scopeQuestion(withDeclared(labels, body.scope, shared)),
       PURPOSE_QUESTION,
       READER_QUESTION,
       AUDIENCE_QUESTION,
@@ -624,11 +626,12 @@ function reasonFlags(response: JevResponse, neighbourId: string): string[] {
 function withDeclared(
   labels: Array<[string, string | null]>,
   declared: string,
+  shared: string,
 ): Array<[string, string | null]> {
   const names = new Set(labels.map(([name]) => name));
   const merged = [...labels];
 
-  for (const name of [declared, "global"]) {
+  for (const name of [declared, shared]) {
     if (!names.has(name)) {
       merged.push([name, null]);
       names.add(name);

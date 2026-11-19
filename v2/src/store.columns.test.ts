@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import * as lancedb from "@lancedb/lancedb";
-import { Bool, Field, FixedSizeList, Float32, Int32, Schema, Utf8 } from "apache-arrow";
+import { Bool, Field, FixedSizeList, Float32, Float64, Int32, Schema, Utf8 } from "apache-arrow";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ensureColumns, findById, insert, openStore, proposalToRow, rowToProposal, selectWhere } from "./store.ts";
@@ -216,6 +216,32 @@ describe("ensureColumns", () => {
     expect(events.map((entry) => entry.table).sort()).toEqual(["legacy", "proposals", "records"]);
     expect(events.find((entry) => entry.table === "records")?.columns).toEqual(NEW_RECORD_COLUMNS);
     expect(events.find((entry) => entry.table === "proposals")?.columns).toEqual(NEW_PROPOSAL_COLUMNS);
+  });
+
+  it("adds threadId, task and via to an old read_log and old rows read null", async () => {
+    const db = await lancedb.connect(dir);
+    const oldLog = await db.createEmptyTable(
+      "read_log",
+      new Schema([
+        text("id", false),
+        text("ts"),
+        text("query"),
+        text("scope"),
+        text("resultId"),
+        text("source"),
+        new Field("rank", new Int32(), true),
+        new Field("score", new Float64(), true),
+      ]),
+    );
+    await oldLog.add([{ id: "r1", ts: "t", query: "q", scope: null, resultId: "x", source: "legacy", rank: 0, score: 1 }]);
+
+    const store = await openStore(dir, TEST_DIM);
+
+    const columns = await columnsOf(dir, "read_log");
+    expect(columns).toEqual(expect.arrayContaining(["threadId", "task", "via"]));
+
+    const [row] = await selectWhere<Record<string, unknown>>(store.readLog, undefined);
+    expect(row).toMatchObject({ id: "r1", threadId: null, task: null, via: null });
   });
 
   it("is a no-op on a second open", async () => {

@@ -35,6 +35,7 @@ import type {
   StoredRecord,
   Suggestion,
 } from "./domain.ts";
+import type { Mode } from "./config.ts";
 import { cosine } from "./embed.ts";
 import { ProposalChecker, ask as askJev, recordSummary, yesProbability } from "./jev/checks.ts";
 import { NEW_COVERS_OLD_QUESTION, loadTopics } from "./jev/questions.ts";
@@ -69,6 +70,9 @@ export interface ProposalOptions extends JevSettings {
   foldSimilarityFloor?: number;
   foldSubjectFloor?: number;
   foldAskTimeoutMs?: number;
+  sharedScopeOf?: (scope: string) => string;
+  profileOf?: (scope: string) => string;
+  mode?: Mode;
 }
 
 export interface NeighbourCandidate extends Neighbour {
@@ -436,6 +440,9 @@ export class ProposalService {
   private readonly jev: JevClient | null;
   private readonly model: string;
   private readonly timeoutMs: number | undefined;
+  private readonly sharedScopeOf: (scope: string) => string;
+  private readonly profileOf: (scope: string) => string;
+  private readonly mode: Mode;
 
   constructor(
     store: Store,
@@ -457,12 +464,16 @@ export class ProposalService {
     this.jev = options.jev ?? null;
     this.model = options.model ?? "jev-1.13.0";
     this.timeoutMs = options.timeoutMs;
+    this.sharedScopeOf = options.sharedScopeOf ?? (() => "global");
+    this.profileOf = options.profileOf ?? (() => "default");
+    this.mode = options.mode ?? "t3";
     this.checker = new ProposalChecker({
+      sharedScopeOf: this.sharedScopeOf,
       client: options.jev ?? null,
       model: this.model,
       topics: loadTopics(options.topicsPath),
       timeoutMs: options.timeoutMs,
-      scopeLabels: () => this.scopeLabels(),
+      scopeLabels: (scope) => this.scopeLabels(scope),
     });
   }
 
@@ -507,7 +518,11 @@ export class ProposalService {
   }
 
   private appliesOnCreate(proposal: Proposal): boolean {
-    return proposal.origin === "agent";
+    if (proposal.origin === "agent") {
+      return true;
+    }
+
+    return this.mode === "standalone" && (proposal.origin === "cleaner" || proposal.origin === "promotion");
   }
 
   private async applyOnCreate(proposal: Proposal): Promise<Proposal> {
@@ -738,15 +753,16 @@ export class ProposalService {
     return { kind: body.kind, headline: body.headline, ...body.fields };
   }
 
-  private async scopeLabels(): Promise<Array<[string, string | null]>> {
+  private async scopeLabels(declared: string): Promise<Array<[string, string | null]>> {
     const [current, archived] = await Promise.all([
       this.store.records.query().select(["scope"]).toArray(),
       this.store.legacy.query().select(["scope"]).toArray(),
     ]);
     const names = new Set<string>();
+    const profile = this.profileOf(declared);
 
     for (const row of [...current, ...archived]) {
-      if (typeof row.scope === "string" && row.scope !== "") {
+      if (typeof row.scope === "string" && row.scope !== "" && this.profileOf(row.scope) === profile) {
         names.add(row.scope);
       }
     }
@@ -756,7 +772,7 @@ export class ProposalService {
 
   private async neighbours(body: ProposalBody, vector: number[]): Promise<NeighbourCandidate[]> {
     const query = recordText(this.textOf(body));
-    const where = liveFilter(body.scope, null, null);
+    const where = liveFilter(body.scope, null, null, this.sharedScopeOf(body.scope));
     const [current, archived] = await Promise.all([
       hybridSearch<MemoryRecord>(this.store.records, { query, vector, where, limit: NEIGHBOUR_COUNT }),
       hybridSearch<LegacyRecord>(this.store.legacy, { query, vector, where, limit: NEIGHBOUR_COUNT }),
@@ -1296,7 +1312,7 @@ export class ProposalService {
 
     await this.records.requireClosableDefect(target.recordId);
 
-    return this.records.markClosed(target.recordId, proposal.id);
+    return this.records.markClosed(target.recordId, proposal.id, proposal.provenance.threadId ?? null);
   }
 
   private async applyRetire(target: ProposalTarget, input: ApproveInput): Promise<StoredRecord> {

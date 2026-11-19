@@ -237,8 +237,21 @@ export interface ReadLogEntry {
   scope: string | null;
   resultId: string;
   source: Source;
-  rank: number;
-  score: number;
+  rank: number | null;
+  score: number | null;
+  threadId?: string | null;
+  task?: string | null;
+  via?: string | null;
+}
+
+export interface DefectEvent {
+  id: string;
+  ts: string;
+  recordId: string;
+  event: "take" | "release" | "auto-release" | "close";
+  threadId: string | null;
+  link: string | null;
+  proposalId: string | null;
 }
 
 export interface JevRequest {

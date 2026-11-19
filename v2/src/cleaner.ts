@@ -7,8 +7,9 @@ import {
   DEFAULT_CLEANER_CONFIDENCE_FLOOR,
   GATE_QUESTIONS,
 } from "./config.ts";
+import type { Mode } from "./config.ts";
 import type { JevClient, LegacyRecord, MemoryRecord, Proposal, ProposalBody, ProposalTarget } from "./domain.ts";
-import { GLOBAL_SCOPE, recordText } from "./domain.ts";
+import { recordText } from "./domain.ts";
 import { MalformedAnswer, askContradiction, askRelevance } from "./jev/checks.ts";
 import type { ContradictionResult } from "./jev/checks.ts";
 import type { ProposalService } from "./proposals.ts";
@@ -41,6 +42,8 @@ export interface CleanerOptions {
   promotionReads?: number;
   promotionWindowDays?: number;
   rejectedCooldownDays?: number;
+  sharedScopeOf?: (scope: string) => string;
+  mode?: Mode;
   log?: (message: string) => void;
 }
 
@@ -63,6 +66,8 @@ interface RunSettings {
   maxJevCalls: number;
   promotionReads: number;
   promotionWindowDays: number;
+  sharedScopeOf: (scope: string) => string;
+  mode: Mode;
   log: (message: string) => void;
 }
 
@@ -137,6 +142,8 @@ export class Cleaner {
   private readonly promotionReads: number;
   private readonly promotionWindowDays: number;
   private readonly rejectedCooldownDays: number;
+  private readonly sharedScopeOf: (scope: string) => string;
+  private readonly mode: Mode;
   private readonly log: (message: string) => void;
 
   constructor(options: CleanerOptions) {
@@ -156,6 +163,8 @@ export class Cleaner {
     this.promotionReads = options.promotionReads ?? 3;
     this.promotionWindowDays = options.promotionWindowDays ?? 30;
     this.rejectedCooldownDays = options.rejectedCooldownDays ?? 90;
+    this.sharedScopeOf = options.sharedScopeOf ?? (() => "global");
+    this.mode = options.mode ?? "t3";
     this.log = options.log ?? ((message) => console.log(message));
 
     const stamp = () => this.now().toISOString();
@@ -198,6 +207,8 @@ export class Cleaner {
       confidenceFloor: await this.confidenceFloor(),
       maxJevCalls: this.maxJevCalls,
       promotionReads: this.promotionReads,
+      sharedScopeOf: this.sharedScopeOf,
+      mode: this.mode,
       promotionWindowDays: this.promotionWindowDays,
       log: this.log,
     };
@@ -478,7 +489,7 @@ class CleanerRun {
       return older.supersededBy === record.id ? "settled" : "declined";
     }
 
-    if (!keeperIsReachable({ older, newer: record, similarity: 0 })) {
+    if (!keeperIsReachable({ older, newer: record, similarity: 0 }, this.s.sharedScopeOf)) {
       return "declined";
     }
 
@@ -508,7 +519,7 @@ class CleanerRun {
     const since = new Date(this.s.now.getTime() - this.s.promotionWindowDays * DAY_MS).toISOString();
     const reads = await selectWhere<{ resultId: string }>(
       this.s.store.readLog,
-      `source = 'legacy' AND ts >= ${sqlString(since)}`,
+      `source = 'legacy' AND (via IS NULL OR via = 'recall') AND ts >= ${sqlString(since)}`,
       100_000,
     );
     const counts = new Map<string, number>();
@@ -599,7 +610,11 @@ class CleanerRun {
     const pairs: Pair[] = [];
 
     for (const record of candidates) {
-      const where = andAll(["lifecycle = 'live'", scopeClause(record.scope), `id != ${sqlString(record.id)}`]);
+      const where = andAll([
+        "lifecycle = 'live'",
+        scopeClause(record.scope, this.s.sharedScopeOf(record.scope)),
+        `id != ${sqlString(record.id)}`,
+      ]);
       const near = await this.s.store.records
         .query()
         .nearestTo(record.vector)
@@ -626,7 +641,7 @@ class CleanerRun {
 
         const pair = orderPair(record, other, similarity);
 
-        if (keeperIsReachable(pair)) {
+        if (keeperIsReachable(pair, this.s.sharedScopeOf)) {
           pairs.push(pair);
         }
       }
@@ -648,7 +663,15 @@ class CleanerRun {
       return;
     }
 
+    if (this.s.mode === "standalone" && !this.mergeable(verdict)) {
+      return;
+    }
+
     await this.merge(pair, verdict.status === "answered" ? verdict.result : null);
+  }
+
+  private mergeable(verdict: PairVerdict): boolean {
+    return verdict.status === "answered" && verdict.result.pick !== "coexist";
   }
 
   private async contradiction(pair: Pair): Promise<void> {
@@ -825,8 +848,8 @@ function orderPair(a: MemoryRecord, b: MemoryRecord, similarity: number): Pair {
   return aFirst ? { older: a, newer: b, similarity } : { older: b, newer: a, similarity };
 }
 
-function keeperIsReachable(pair: Pair): boolean {
-  return pair.newer.scope === pair.older.scope || pair.newer.scope === GLOBAL_SCOPE;
+function keeperIsReachable(pair: Pair, sharedScopeOf: (scope: string) => string): boolean {
+  return pair.newer.scope === pair.older.scope || pair.newer.scope === sharedScopeOf(pair.older.scope);
 }
 
 function rotate(records: MemoryRecord[], now: Date): MemoryRecord[] {

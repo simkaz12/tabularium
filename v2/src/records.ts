@@ -17,7 +17,7 @@ import type {
   StoredRecord,
 } from "./domain.ts";
 import type { Embedder } from "./embed.ts";
-import { findById, selectWhere, sqlString, upsert } from "./store.ts";
+import { findById, insert, selectWhere, sqlString, upsert } from "./store.ts";
 import type { Store } from "./store.ts";
 
 export interface Located {
@@ -93,6 +93,23 @@ function parseTaker(raw: unknown): { threadId: string; link: string } {
   return { threadId: requireText(body.threadId, "threadId"), link: requireText(body.link, "link") };
 }
 
+export function threadIdOf(raw: unknown): string | null {
+  if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+    const value = (raw as Record<string, unknown>).threadId;
+
+    return typeof value === "string" && value !== "" ? value : null;
+  }
+
+  return null;
+}
+
+export interface ReleaseActor {
+  threadId?: string | null;
+  sweep?: boolean;
+}
+
+export type DefectEventName = "take" | "release" | "auto-release" | "close";
+
 export function requireReasonClass(value: unknown): ReasonClass {
   if (typeof value === "string" && (REASON_CLASSES as readonly string[]).includes(value)) {
     return value as ReasonClass;
@@ -167,6 +184,62 @@ export class RecordService {
     };
   }
 
+  async read(id: string, threadId?: string | null): Promise<RecordView> {
+    const view = await this.get(id);
+
+    await this.logRead(view, threadId ?? null);
+
+    return view;
+  }
+
+  private async logRead(view: RecordView, threadId: string | null): Promise<void> {
+    try {
+      await insert(this.store.readLog, [
+        {
+          id: randomUUID(),
+          ts: this.now(),
+          query: null,
+          scope: view.scope,
+          resultId: view.id,
+          source: view.source,
+          rank: null,
+          score: null,
+          threadId,
+          task: null,
+          via: "get",
+        },
+      ]);
+    } catch (error) {
+      console.error(JSON.stringify({ event: "read-log-failed", id: view.id, error: String(error) }));
+    }
+  }
+
+  private async logDefectEvent(event: {
+    recordId: string;
+    event: DefectEventName;
+    threadId?: string | null;
+    link?: string | null;
+    proposalId?: string | null;
+  }): Promise<void> {
+    try {
+      await insert(this.store.defectEvents, [
+        {
+          id: randomUUID(),
+          ts: this.now(),
+          recordId: event.recordId,
+          event: event.event,
+          threadId: event.threadId ?? null,
+          link: event.link ?? null,
+          proposalId: event.proposalId ?? null,
+        },
+      ]);
+    } catch (error) {
+      console.error(
+        JSON.stringify({ event: "defect-event-failed", recordId: event.recordId, error: String(error) }),
+      );
+    }
+  }
+
   async requireClosableDefect(id: string): Promise<Located> {
     const found = await this.require(id);
 
@@ -213,12 +286,13 @@ export class RecordService {
         takenAt: this.now(),
       };
       await upsert(found.table, [updated as unknown as Record<string, unknown>]);
+      await this.logDefectEvent({ recordId: id, event: "take", threadId: taker.threadId, link: taker.link });
 
       return this.get(id);
     });
   }
 
-  async release(id: string): Promise<RecordView> {
+  async release(id: string, actor: ReleaseActor = {}): Promise<RecordView> {
     return this.store.withLock(async () => {
       const found = await this.requireDefect(id);
 
@@ -230,13 +304,18 @@ export class RecordService {
           takenLink: null,
         };
         await upsert(found.table, [updated as unknown as Record<string, unknown>]);
+        await this.logDefectEvent({
+          recordId: id,
+          event: actor.sweep === true ? "auto-release" : "release",
+          threadId: actor.sweep === true ? null : (actor.threadId ?? null),
+        });
       }
 
       return this.get(id);
     });
   }
 
-  async markClosed(id: string, byId: string): Promise<StoredRecord> {
+  async markClosed(id: string, byId: string, threadId: string | null = null): Promise<StoredRecord> {
     const found = await this.requireClosableDefect(id);
     const updated = {
       ...found.row,
@@ -245,6 +324,7 @@ export class RecordService {
       closedAt: this.now(),
     };
     await upsert(found.table, [updated as unknown as Record<string, unknown>]);
+    await this.logDefectEvent({ recordId: id, event: "close", threadId, proposalId: byId });
 
     return updated;
   }

@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { scheduleAt } from "./cleaner.ts";
 import { sweepDefects } from "./defectSweep.ts";
-import type { MemoryRecord } from "./domain.ts";
+import type { DefectEvent, MemoryRecord } from "./domain.ts";
 import { keyedRunClock } from "./settings.ts";
 import { createApprovedDefect, defectBody, makeHarness, proposalBody } from "./testing.ts";
 import type { Harness } from "./testing.ts";
-import { findById } from "./store.ts";
+import { findById, selectWhere } from "./store.ts";
 
 const DAY_MS = 86_400_000;
 const NOW = new Date("2026-11-03T10:00:00.000Z");
@@ -357,5 +357,51 @@ describe("defect sweep schedule", () => {
     expect(saved.has("meta:lastDefectSweepAt")).toBe(true);
 
     schedule.stop();
+  });
+});
+
+describe("sweepDefects logs auto-release events", () => {
+  it("writes an auto-release event with a null thread id per released take", async () => {
+    const defect = await defectAged(20);
+    await takeAged(defect, 15);
+
+    await sweep();
+
+    const events = await selectWhere<DefectEvent>(harness.store.defectEvents, "event = 'auto-release'");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ recordId: defect.id, threadId: null });
+  });
+
+  it("writes no auto-release event for a kept take", async () => {
+    const defect = await defectAged(20);
+    await takeAged(defect, 13);
+
+    await sweep();
+
+    const events = await selectWhere<DefectEvent>(harness.store.defectEvents, "event = 'auto-release'");
+    expect(events).toEqual([]);
+  });
+});
+
+describe.each(["t3", "standalone"] as const)("defect sweep in %s mode", (mode) => {
+  const closes = mode === "t3";
+
+  it(`${closes ? "creates" : "skips"} the close tile for a stale open defect`, async () => {
+    await defectAged(91, "export drops rows");
+
+    const report = await sweep({ mode });
+
+    expect(report.asked).toBe(closes ? 1 : 0);
+    expect(await pending()).toHaveLength(closes ? 1 : 0);
+  });
+
+  it("still releases a stale take", async () => {
+    const defect = await defectAged(20);
+    await takeAged(defect, 15);
+
+    const report = await sweep({ mode });
+
+    expect(report.released).toBe(1);
+    expect((await stored(defect.id)).defectStatus).toBe("open");
   });
 });
