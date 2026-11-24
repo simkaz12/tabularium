@@ -16,7 +16,7 @@ jobs:
     name: Publish TabuMCP
     if: github.repository == 'simkaz12/tabularium'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 35
     permissions:
       contents: read
       id-token: write
@@ -70,6 +70,22 @@ jobs:
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Wait for npm to serve the version
+        env:
+          TAG: ${{ github.ref_name }}
+          POLL_INTERVAL: '15'
+        run: |
+          VERSION="${TAG#v}"
+          for attempt in $(seq 1 60); do
+            served="$(npm view "tabumcp@${VERSION}" version 2>/dev/null || true)"
+            if [ "$served" = "$VERSION" ]; then
+              echo "npm serves tabumcp@${VERSION} after ${attempt} tries"
+              exit 0
+            fi
+            sleep "$POLL_INTERVAL"
+          done
+          echo "npm has not served tabumcp@${VERSION} after 15 minutes. npm may be holding it as a staged publish: approve it on npmjs.com, then publish to the registry by hand from v2/ with mcp-publisher login github and mcp-publisher publish."
+          exit 1
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
       - name: Download and verify mcp-publisher
