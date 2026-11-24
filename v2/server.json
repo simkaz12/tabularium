@@ -3,7 +3,7 @@
   "name": "io.github.simkaz12/tabumcp",
   "title": "TabuMCP",
   "description": "Local long-term memory server for coding agents, with scoped recall and work/personal profiles.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "repository": {
     "url": "https://github.com/simkaz12/tabularium",
     "source": "github",
@@ -14,7 +14,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "tabumcp",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "runtimeHint": "npx",
       "transport": {
         "type": "streamable-http",
