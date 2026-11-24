@@ -315,6 +315,47 @@ describe("doctor", () => {
     expect(h.out.join("\n")).toMatch(/FAIL {2}ollama/);
   });
 
+  it("points an unreachable Ollama at the download page", async () => {
+    const h = makeHarness();
+
+    await install(h.ctx);
+    h.tagsOk.value = false;
+    h.out.length = 0;
+
+    await doctor(h.ctx);
+
+    expect(h.out.join("\n")).toContain("ollama.com/download");
+  });
+
+  it("prints the embedder chosen at install", async () => {
+    const h = makeHarness();
+    const paths = resolvePaths(h.ctx);
+
+    await install(h.ctx);
+    writeFileSync(paths.envFile, "TABULARIUM_EMBED_MODEL=bge-m3\nTABULARIUM_EMBED_DIM=1024\n");
+    h.out.length = 0;
+
+    await doctor(h.ctx);
+
+    expect(h.out.join("\n")).toContain("embedder: bge-m3, 1024 dimensions");
+  });
+
+  it("names the log command for an inactive service on each platform", async () => {
+    const linux = makeHarness();
+
+    writeFileSync(`${linux.logFile}.stopped`, "");
+    await doctor(linux.ctx);
+
+    expect(linux.out.join("\n")).toContain("journalctl --user -u tabumcp -n 20");
+
+    const mac = makeHarness({ platform: "darwin", arch: "arm64" });
+
+    writeFileSync(`${mac.logFile}.stopped`, "");
+    await doctor(mac.ctx);
+
+    expect(mac.out.join("\n")).toContain(resolvePaths(mac.ctx).logFile);
+  });
+
   it("fails on an embedder build mismatch", async () => {
     const h = makeHarness();
 
@@ -390,6 +431,33 @@ describe("main", () => {
 
     expect(await runCli(["bogus"], h.ctx)).toBe(2);
     expect(h.err.join("\n")).toContain("usage: tabumcp");
+  });
+
+  it("prints usage to stdout and exits 0 for help in every spelling", async () => {
+    for (const word of ["--help", "-h", "help"]) {
+      const h = makeHarness();
+
+      expect(await runCli([word], h.ctx)).toBe(0);
+      expect(h.out.join("\n")).toBe(USAGE);
+      expect(h.err).toEqual([]);
+    }
+  });
+
+  it("prints the version and exits 0", async () => {
+    for (const word of ["--version", "-v"]) {
+      const h = makeHarness();
+
+      expect(await runCli([word], h.ctx)).toBe(0);
+      expect(h.out).toEqual([h.ctx.version]);
+    }
+  });
+
+  it("exits 2 with usage on stderr when given no arguments", async () => {
+    const h = makeHarness();
+
+    expect(await runCli([], h.ctx)).toBe(2);
+    expect(h.err.join("\n")).toBe(USAGE);
+    expect(h.out).toEqual([]);
   });
 
   it("registers the lifecycle commands", () => {

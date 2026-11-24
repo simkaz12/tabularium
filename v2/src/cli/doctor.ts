@@ -2,7 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 
 import { linkReport } from "./binLink.ts";
 import type { Ctx } from "./context.ts";
-import { EMBED_MODEL, mcpUrl, nodeProblem, platformProblem, portFrom, resolvePaths } from "./paths.ts";
+import { DEFAULT_EMBED_DIM, DEFAULT_EMBED_MODEL } from "./embedders.ts";
+import { SERVICE_NAME, mcpUrl, nodeProblem, platformProblem, portFrom, resolvePaths } from "./paths.ts";
 import { readEnvFile } from "./serve.ts";
 import { serviceActive } from "./service.ts";
 
@@ -69,7 +70,7 @@ export async function waitHealthy(ctx: Ctx): Promise<boolean> {
 async function ollamaChecks(ctx: Ctx): Promise<Check[]> {
   const env = mergedEnv(ctx);
   const embedUrl = env.TABULARIUM_EMBED_URL || "http://localhost:11434/api/embed";
-  const model = env.TABULARIUM_EMBED_MODEL || EMBED_MODEL;
+  const model = env.TABULARIUM_EMBED_MODEL || DEFAULT_EMBED_MODEL;
 
   try {
     const response = await ctx.fetch(`${new URL(embedUrl).origin}/api/tags`, { signal: AbortSignal.timeout(5000) });
@@ -91,7 +92,11 @@ async function ollamaChecks(ctx: Ctx): Promise<Check[]> {
     ];
   } catch (error) {
     return [
-      { name: "ollama", ok: false, detail: `not reachable at ${embedUrl}: ${(error as Error).message}` },
+      {
+        name: "ollama",
+        ok: false,
+        detail: `not reachable at ${embedUrl}: ${(error as Error).message}. Install it from https://ollama.com/download, or start it with: ollama serve`,
+      },
       { name: "model", ok: false, detail: `cannot check ${model} without Ollama` },
     ];
   }
@@ -107,6 +112,18 @@ function stampCheck(health: Awaited<ReturnType<typeof fetchHealth>>): Check {
   const ok = status === "match" || status === "missing" || status === "unchecked";
 
   return { name: "embedder build", ok, detail: status ?? "unknown" };
+}
+
+function logHint(ctx: Ctx): string {
+  return ctx.platform === "darwin" ? `see ${resolvePaths(ctx).logFile}` : `see: journalctl --user -u ${SERVICE_NAME} -n 20`;
+}
+
+function embedderLine(ctx: Ctx): Check {
+  const env = mergedEnv(ctx);
+  const model = env.TABULARIUM_EMBED_MODEL || DEFAULT_EMBED_MODEL;
+  const dim = Number(env.TABULARIUM_EMBED_DIM) || DEFAULT_EMBED_DIM;
+
+  return { name: "embedder", ok: true, informational: true, detail: `${model}, ${dim} dimensions` };
 }
 
 function keyHint(ctx: Ctx): string {
@@ -127,7 +144,7 @@ export async function runChecks(ctx: Ctx): Promise<Check[]> {
   const active = await serviceActive(ctx);
   const health = await fetchHealth(ctx);
 
-  checks.push({ name: "service", ok: active, detail: active ? "active" : "not active" });
+  checks.push({ name: "service", ok: active, detail: active ? "active" : `not active, ${logHint(ctx)}` });
   checks.push({
     name: "health",
     ok: health?.status === 200,
@@ -137,6 +154,7 @@ export async function runChecks(ctx: Ctx): Promise<Check[]> {
 
   const key = Boolean(mergedEnv(ctx).TYPESAFE_API_KEY);
 
+  checks.push(embedderLine(ctx));
   checks.push({ name: "command link", ok: true, informational: true, detail: linkReport(ctx) });
 
   checks.push({
