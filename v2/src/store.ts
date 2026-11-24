@@ -156,11 +156,36 @@ const CLEANER_STATE_FIELDS: Field[] = [
   text("updatedAt"),
 ];
 
-async function openOrCreate(db: lancedb.Connection, name: string, fields: Field[]): Promise<Table> {
+async function assertVectorWidth(table: Table, path: string, dim: number): Promise<void> {
+  const column = (await table.schema()).fields.find((field) => field.name === "vector");
+  const stored = (column?.type as { listSize?: number } | undefined)?.listSize;
+
+  if (stored === undefined || stored === dim) {
+    return;
+  }
+
+  throw new Error(
+    `store at ${path} holds ${stored}-dimension vectors, but TABULARIUM_EMBED_DIM is ${dim}. ` +
+      "Set TABULARIUM_EMBED_MODEL and TABULARIUM_EMBED_DIM back to the model this store was built with, " +
+      "or move the store folder aside to start a new one.",
+  );
+}
+
+async function openOrCreate(
+  db: lancedb.Connection,
+  name: string,
+  fields: Field[],
+  guard?: { path: string; dim: number },
+): Promise<Table> {
   const names = await db.tableNames();
 
   if (names.includes(name)) {
     const table = await db.openTable(name);
+
+    if (guard !== undefined) {
+      await assertVectorWidth(table, guard.path, guard.dim);
+    }
+
     await ensureColumns(table, fields);
 
     return table;
@@ -219,8 +244,8 @@ class Mutex {
 
 export async function openStore(path: string, dim: number): Promise<Store> {
   const db = await lancedb.connect(path, { readConsistencyInterval: 0 });
-  const records = await openOrCreate(db, "records", recordFields(dim));
-  const legacy = await openOrCreate(db, "legacy", legacyFields(dim));
+  const records = await openOrCreate(db, "records", recordFields(dim), { path, dim });
+  const legacy = await openOrCreate(db, "legacy", legacyFields(dim), { path, dim });
   const proposals = await openOrCreate(db, "proposals", PROPOSAL_FIELDS);
   const readLog = await openOrCreate(db, "read_log", READ_LOG_FIELDS);
   const defectEvents = await openOrCreate(db, "defect_events", DEFECT_EVENT_FIELDS);
