@@ -4,7 +4,7 @@ TabuMCP gives coding agents a long-term memory they share across sessions. It ru
 
 ## Status
 
-TabuMCP 0.1.0 is pre-release. The npm package is not published yet, so `npx tabumcp install` works only once the first release is out.
+TabuMCP 0.1.1 is pre-release. Install it with `npx tabumcp install`.
 
 Tested: the packed package ran end to end on Linux x64 in a Docker sandbox with Ubuntu 24.04, a systemd user service, a private npm registry, and the real Claude Code and Codex CLIs. A real Codex agent saved and recalled through it, and the separation between a work and a personal profile held.
 
@@ -24,7 +24,7 @@ This is a solo project that I use every day for my own coding agents. It is a pu
 ## Requirements
 
 - Node 22 or newer.
-- [Ollama](https://ollama.com) running, with the `nomic-embed-text` model pulled.
+- [Ollama](https://ollama.com) running. The installer asks which embedding model to use and offers to pull it.
 - Linux (x64 or arm64) or macOS on Apple Silicon. On Windows, use WSL2, which counts as Linux. Intel Macs and native Windows are not supported.
 
 ## Install
@@ -33,7 +33,7 @@ This is a solo project that I use every day for my own coding agents. It is a pu
 npx tabumcp install
 ```
 
-The installer puts the app in `~/.local/share/tabumcp/app/<version>` (`~/Library/Application Support/tabumcp/app/<version>` on macOS), writes the config and a random token to `~/.config/tabumcp/` (mode 600), and starts a systemd user unit on Linux or a launchd agent on macOS. It offers to pull the embedding model with Ollama when it is missing, copies the setup skill to `~/.claude/skills/tabumcp/` and `~/.agents/skills/tabumcp/`, runs `tabumcp doctor`, and prints the next step: ask your agent to run the `tabumcp` skill.
+The installer puts the app in `~/.local/share/tabumcp/app/<version>` (`~/Library/Application Support/tabumcp/app/<version>` on macOS), writes the config and a random token to `~/.config/tabumcp/` (mode 600), and starts a systemd user unit on Linux or a launchd agent on macOS. It asks which Ollama embedding model to use (fixed after the first install, see the Embedding model section of v2/README.md), offers to pull it when it is missing, copies the setup skill to `~/.claude/skills/tabumcp/` and `~/.agents/skills/tabumcp/`, runs `tabumcp doctor`, and prints the next step: ask your agent to run the `tabumcp` skill.
 
 It also links the command as `~/.local/bin/tabumcp` and prints the line to add to your shell profile if that folder is not on your `PATH`.
 

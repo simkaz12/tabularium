@@ -27,7 +27,9 @@ export interface Ctx {
   fetch: typeof fetch;
   out: (line: string) => void;
   err: (line: string) => void;
+  interactive: boolean;
   confirm: (question: string) => Promise<boolean>;
+  ask: (question: string) => Promise<string>;
   secret: (question: string) => Promise<string>;
   sleep: (ms: number) => Promise<void>;
   healthAttempts: number;
@@ -62,6 +64,20 @@ async function promptConfirm(question: string): Promise<boolean> {
     const answer = await rl.question(`${question} [y/N] `);
 
     return /^y(es)?$/i.test(answer.trim());
+  } finally {
+    rl.close();
+  }
+}
+
+async function promptAsk(question: string): Promise<string> {
+  if (!process.stdin.isTTY) {
+    return "";
+  }
+
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+
+  try {
+    return (await rl.question(question)).trim();
   } finally {
     rl.close();
   }
@@ -115,7 +131,9 @@ export function defaultContext(moduleUrl: string, version: string): Ctx {
     fetch,
     out: (line) => console.log(line),
     err: (line) => console.error(line),
+    interactive: process.stdin.isTTY === true,
     confirm: promptConfirm,
+    ask: promptAsk,
     secret: promptSecret,
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     healthAttempts: 20,

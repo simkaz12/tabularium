@@ -9,7 +9,7 @@ Run these in order. Ask one question at a time and wait for the answer. Every co
 
 ## 1. Check the install
 
-Run `~/.local/bin/tabumcp doctor`. If any line fails, show the failing lines to the user, say what each one needs (the line names the fix), and stop. Do not go on with a broken install.
+Run `~/.local/bin/tabumcp doctor`. If any line fails, show the failing lines to the user, say what each one needs (the line names the fix), and stop. Do not go on with a broken install. The `embedder` line shows the embedding model chosen at install, which cannot be changed later.
 
 ## 2. Profiles
 

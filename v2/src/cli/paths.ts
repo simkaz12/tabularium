@@ -6,7 +6,6 @@ import { SUPPORTED_MESSAGE } from "./context.ts";
 export const SERVICE_NAME = "tabumcp";
 export const LAUNCHD_LABEL = "io.github.simkaz12.tabumcp";
 export const DEFAULT_PORT = 8789;
-export const EMBED_MODEL = "nomic-embed-text";
 export const MIN_NODE_MAJOR = 22;
 
 export interface CliPaths {

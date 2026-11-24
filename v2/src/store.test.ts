@@ -43,6 +43,47 @@ describe("store", () => {
     expect(indexed).toEqual(["claim", "headline", "lifecycle", "scope"]);
   });
 
+  describe("vector width guard", () => {
+    async function seedNarrow(path: string, dim: number): Promise<void> {
+      const store = await openStore(path, dim);
+      const vector = Array.from({ length: dim }, (_, index) => (index === 0 ? 1 : 0));
+
+      await insert(store.records, [
+        { id: "seed", headline: "seeded headline", claim: "seeded claim", lifecycle: "live", vector },
+      ]);
+    }
+
+    it("rejects reopening a 768 store at 1024 and names both widths", async () => {
+      const path = tmp();
+      await seedNarrow(path, 768);
+
+      await expect(openStore(path, 1024)).rejects.toThrow(/768.*1024/);
+    });
+
+    it("reopens at the stored width and searches the seeded row", async () => {
+      const path = tmp();
+      await seedNarrow(path, 768);
+
+      const store = await openStore(path, 768);
+      const vector = Array.from({ length: 768 }, (_, index) => (index === 0 ? 1 : 0));
+      const hits = await hybridSearch<{ id: string }>(store.records, {
+        query: "seeded",
+        vector,
+        where: "lifecycle = 'live'",
+        limit: 5,
+      });
+
+      expect(hits[0]?.row.id).toBe("seed");
+    });
+
+    it("creates a new store with a vector column of the requested width", async () => {
+      const store = await openStore(tmp(), 1024);
+      const column = (await store.records.schema()).fields.find((field) => field.name === "vector");
+
+      expect((column?.type as { listSize?: number }).listSize).toBe(1024);
+    });
+  });
+
   it("sees rows written through another connection", async () => {
     const path = tmp();
     const reader = await openStore(path, 8);

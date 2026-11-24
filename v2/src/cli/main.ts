@@ -17,7 +17,7 @@ import { update } from "./update.ts";
 
 export const USAGE = [
   "usage: tabumcp <command>",
-  "  install            set up the user service",
+  "  install [--embed-model <name>]   set up the user service",
   "  update [--version <x>]   install the latest version (or <x>) and restart the service",
   "  uninstall [--purge] [--yes]",
   "  doctor             check the install",
@@ -32,7 +32,7 @@ export const USAGE = [
 type Handler = (ctx: Ctx, flags: string[]) => Promise<number>;
 
 export const COMMANDS: Record<string, Handler> = {
-  install: (ctx) => install(ctx),
+  install: (ctx, flags) => install(ctx, flags),
   update: (ctx, flags) => update(ctx, flags),
   "post-update": (ctx, flags) => postUpdate(ctx, flags),
   uninstall: (ctx, flags) => uninstall(ctx, { purge: flags.includes("--purge"), yes: flags.includes("--yes") }),
@@ -47,6 +47,19 @@ export const COMMANDS: Record<string, Handler> = {
 
 export async function runCli(argv: string[], ctx: Ctx): Promise<number> {
   const [command, ...flags] = argv;
+
+  if (command === "--help" || command === "-h" || command === "help") {
+    ctx.out(USAGE);
+
+    return 0;
+  }
+
+  if (command === "--version" || command === "-v") {
+    ctx.out(ctx.version);
+
+    return 0;
+  }
+
   const handler = command === undefined ? undefined : COMMANDS[command];
 
   if (handler === undefined) {

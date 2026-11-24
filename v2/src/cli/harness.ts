@@ -17,6 +17,9 @@ export interface Harness {
   health: { status: number; embedder: string };
   tagsOk: { value: boolean };
   confirmAnswer: { value: boolean };
+  answers: string[];
+  asked: string[];
+  embed: { dim: number | null; models: string[] };
   secretAnswer: { value: string };
   registry: { version: string; code: number };
   newBinary: { fail: boolean; run: ((flags: string[]) => Promise<number>) | null };
@@ -65,6 +68,9 @@ export function makeHarness(overrides: Partial<Ctx> = {}): Harness {
   const tagsOk = { value: true };
   const confirmAnswer = { value: false };
   const secretAnswer = { value: "" };
+  const answers: string[] = [];
+  const asked: string[] = [];
+  const embed: Harness["embed"] = { dim: 768, models: ["nomic-embed-text:latest"] };
   const registry = { version: "", code: 0 };
   const newBinary: Harness["newBinary"] = { fail: false, run: null };
 
@@ -76,7 +82,15 @@ export function makeHarness(overrides: Partial<Ctx> = {}): Harness {
         throw new Error("connection refused");
       }
 
-      return Response.json({ models: [{ name: "nomic-embed-text:latest" }] });
+      return Response.json({ models: embed.models.map((name) => ({ name })) });
+    }
+
+    if (url.endsWith("/api/embed")) {
+      if (embed.dim === null) {
+        return new Response("{}", { status: 500 });
+      }
+
+      return Response.json({ embeddings: [Array.from({ length: embed.dim }, () => 0.1)] });
     }
 
     const auth = (init?.headers as Record<string, string> | undefined)?.Authorization;
@@ -124,7 +138,13 @@ export function makeHarness(overrides: Partial<Ctx> = {}): Harness {
     fetch: fakeFetch,
     out: (line) => out.push(line),
     err: (line) => err.push(line),
+    interactive: true,
     confirm: async () => confirmAnswer.value,
+    ask: async (question) => {
+      asked.push(question);
+
+      return answers.shift() ?? "";
+    },
     secret: async () => secretAnswer.value,
     sleep: async () => {},
     healthAttempts: 1,
@@ -141,6 +161,9 @@ export function makeHarness(overrides: Partial<Ctx> = {}): Harness {
     health,
     tagsOk,
     confirmAnswer,
+    answers,
+    asked,
+    embed,
     secretAnswer,
     registry,
     newBinary,
